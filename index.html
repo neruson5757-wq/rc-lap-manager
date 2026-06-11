@@ -1,0 +1,641 @@
+﻿<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+<title>RC Lap Manager</title>
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="RC Lap Manager">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#090b0f">
+<link rel="manifest" href="manifest.json">
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react/18.2.0/umd/react.production.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/react-dom/18.2.0/umd/react-dom.production.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body { background: #090b0f; color: #e8f0ff; font-family: 'Inter','Helvetica Neue',sans-serif; }
+input[type=range] { cursor: pointer; }
+input[type=date], input[type=time] { color-scheme: dark; }
+::-webkit-scrollbar { width: 10px; height: 10px; }
+::-webkit-scrollbar-track { background: #1a2035; border-radius: 5px; }
+::-webkit-scrollbar-thumb { background: #4a6080; border-radius: 5px; border: 2px solid #1a2035; }
+::-webkit-scrollbar-thumb:hover { background: #6a90b8; }
+::-webkit-scrollbar-corner { background: #1a2035; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+<script>
+"use strict";
+const { useState, useMemo } = React;
+const C = {
+    bg: "#090b0f", surf: "#0f1420", card: "#161d2e", border: "#222d44",
+    accent: "#ff6b1a", cyan: "#00cfff", green: "#00e676", yellow: "#ffd740",
+    red: "#ff4444", text: "#e8f0ff", sub: "#6a7a99", muted: "#323d55",
+};
+const PAL = [
+    "#ff6b1a", "#00cfff", "#00e676", "#ffd740", "#e040fb", "#ff4081",
+    "#40c4ff", "#69f0ae", "#ff80ab", "#b060ff", "#ea80fc", "#84ffff",
+];
+const mono = { fontFamily: "'JetBrains Mono',ui-monospace,monospace" };
+// ── Cloudflare Worker経由でSpeedhive APIを叩く ──────────
+const PROXY = "https://raspy-limit-edb3.neruson5757.workers.dev";
+async function speedhiveFetch(url) {
+    const res = await fetch(`${PROXY}?url=${encodeURIComponent(url)}`);
+    if (!res.ok)
+        throw new Error(`HTTP ${res.status}`);
+    return await res.json();
+}
+// ── ユーティリティ ─────────────────────────────────
+const fmtLap = s => {
+    if (!s || s <= 0)
+        return "--:--.---";
+    const m = Math.floor(s / 60), sec = s - m * 60;
+    return `${m}:${sec.toFixed(3).padStart(6, "0")}`;
+};
+function toDate(iso) { return iso ? new Date(iso) : null; }
+function hmToDate(dateStr, hmStr) {
+    return new Date(`${dateStr}T${hmStr}:00+09:00`);
+}
+function lapInRange(lapStartIso, lapDurSec, fromD, toD) {
+    if (!fromD || !toD)
+        return true;
+    const start = new Date(lapStartIso);
+    const end = new Date(start.getTime() + lapDurSec * 1000);
+    const oS = Math.max(start.getTime(), fromD.getTime());
+    const oE = Math.min(end.getTime(), toD.getTime());
+    return oE > oS;
+}
+function sessionOverlap(lapsRaw, fromD, toD, minSec = 240) {
+    if (!fromD || !toD)
+        return true;
+    let overlap = 0;
+    for (const l of (lapsRaw || [])) {
+        const s = new Date(l.dateTimeStart);
+        const dur = parseFloat(l.duration);
+        if (isNaN(dur))
+            continue;
+        const e = new Date(s.getTime() + dur * 1000);
+        const oS = Math.max(s.getTime(), fromD.getTime());
+        const oE = Math.min(e.getTime(), toD.getTime());
+        if (oE > oS)
+            overlap += (oE - oS) / 1000;
+    }
+    return overlap >= minSec;
+}
+function best5min(laps, w = 300) {
+    // RCレース：5分間(300秒)でスタートしたラップはすべてカウント
+    // ラップがスタート時点で300秒以内なら、たとえ終了が300秒を超えてもカウント
+    if (!(laps === null || laps === void 0 ? void 0 : laps.length))
+        return { count: 0, total: 0 };
+    let best = { count: 0, total: Infinity };
+    for (let i = 0; i < laps.length; i++) {
+        let sum = 0, cnt = 0;
+        for (let j = i; j < laps.length; j++) {
+            if (sum >= w)
+                break; // このラップ開始時点ですでに5分超 → カウントしない
+            sum += laps[j];
+            cnt++;
+        }
+        if (cnt > best.count || (cnt === best.count && sum < best.total))
+            best = { count: cnt, total: sum };
+    }
+    return best;
+}
+// ── UI部品 ───────────────────────────────────────
+function Btn({ children, onClick, v = "primary", sm, disabled, full }) {
+    const s = { primary: { bg: C.accent, c: "#000", bd: "transparent" },
+        secondary: { bg: C.card, c: C.text, bd: C.border },
+        ghost: { bg: "transparent", c: C.sub, bd: C.border },
+        danger: { bg: "#1a0808", c: C.red, bd: "#3a1515" } }[v];
+    return React.createElement("button", { onClick: onClick, disabled: disabled, style: Object.assign(Object.assign({ background: s.bg, color: s.c, border: `1px solid ${s.bd}`, borderRadius: 6, padding: sm ? "5px 10px" : "9px 16px", fontSize: sm ? 11 : 12, fontWeight: 700, cursor: disabled ? "not-allowed" : "pointer", opacity: disabled ? .4 : 1 }, mono), { display: "inline-flex", alignItems: "center", gap: 5, width: full ? "100%" : undefined, justifyContent: full ? "center" : undefined }) }, children);
+}
+function Card({ children, style: sx }) {
+    return React.createElement("div", { style: Object.assign({ background: C.card, border: `1px solid ${C.border}`, borderRadius: 10, padding: 16 }, sx) }, children);
+}
+function Chip({ children, color, sm }) {
+    return React.createElement("span", { style: Object.assign(Object.assign({ background: color + "22", border: `1px solid ${color}55`, color, borderRadius: 4, padding: sm ? "1px 6px" : "2px 8px", fontSize: sm ? 10 : 11 }, mono), { fontWeight: 700 }) }, children);
+}
+function Lbl({ children }) {
+    return React.createElement("div", { style: { color: C.sub, fontSize: 10, fontWeight: 700,
+            letterSpacing: ".8px", textTransform: "uppercase", marginBottom: 10 } }, children);
+}
+function Spin({ size = 16 }) {
+    return React.createElement(React.Fragment, null,
+        React.createElement("style", null, `@keyframes sp{to{transform:rotate(360deg)}}`),
+        React.createElement("div", { style: { width: size, height: size, border: `2px solid ${C.border}`,
+                borderTopColor: C.accent, borderRadius: "50%", animation: "sp .7s linear infinite", flexShrink: 0 } }));
+}
+// ── Speedhive風ラップ表 ─────────────────────────────
+function LapTableView({ driver }) {
+    const laps = driver.laps || [];
+    const rawLaps = driver.rawLaps || [];
+    const bestLap = laps.length ? Math.min(...laps) : null;
+    const maxLap = Math.max(...laps, 0.001);
+    let cum = 0;
+    const rows = laps.map((t, i) => {
+        var _a;
+        cum += t;
+        const iso = ((_a = rawLaps[i]) === null || _a === void 0 ? void 0 : _a.dateTimeStart) || "";
+        const ts = iso ? new Date(iso).toLocaleTimeString("ja-JP", { hour: "2-digit", minute: "2-digit", second: "2-digit" }) : "";
+        return { nr: i + 1, lapTime: t, totalTime: cum, ts };
+    });
+    if (!rows.length)
+        return (React.createElement("div", { style: { color: C.muted, fontSize: 12, textAlign: "center", padding: 12 } }, "\u3053\u306E\u6642\u9593\u5E2F\u306E\u30E9\u30C3\u30D7\u306A\u3057"));
+    return (React.createElement("div", { style: { background: C.bg, borderRadius: 8, overflow: "hidden", border: `1px solid ${C.border}` } },
+        React.createElement("div", { style: Object.assign({ display: "grid", gridTemplateColumns: "40px 62px 1fr 1fr 68px", padding: "6px 10px", borderBottom: `1px solid ${C.border}`, color: C.sub, fontSize: 10 }, mono) },
+            React.createElement("span", null, "Lap"),
+            React.createElement("span", null, "\u6642\u523B"),
+            React.createElement("span", { style: { textAlign: "right" } }, "Total"),
+            React.createElement("span", { style: { textAlign: "right" } }, "Lap Time"),
+            React.createElement("span", { style: { textAlign: "right" } }, "Bar")),
+        React.createElement("div", { style: { maxHeight: 300, overflowY: "auto" } }, rows.map(({ nr, lapTime, totalTime, ts }) => {
+            const isBest = lapTime === bestLap;
+            const bw = Math.round((lapTime / maxLap) * 56);
+            return (React.createElement("div", { key: nr, style: {
+                    display: "grid", gridTemplateColumns: "40px 62px 1fr 1fr 68px",
+                    padding: "5px 10px", borderTop: nr > 1 ? `1px solid ${C.border}` : "none",
+                    background: isBest ? driver.color + "18" : "transparent", alignItems: "center",
+                } },
+                React.createElement("span", { style: Object.assign({ color: C.sub, fontSize: 11 }, mono) }, nr),
+                React.createElement("span", { style: Object.assign({ color: C.muted, fontSize: 10 }, mono) }, ts),
+                React.createElement("span", { style: Object.assign({ textAlign: "right", color: C.sub, fontSize: 11 }, mono) }, fmtLap(totalTime)),
+                React.createElement("span", { style: Object.assign(Object.assign({ textAlign: "right", fontSize: 12 }, mono), { fontWeight: isBest ? 700 : 400, color: isBest ? C.green : C.text }) }, fmtLap(lapTime)),
+                React.createElement("div", { style: { display: "flex", justifyContent: "flex-end", paddingLeft: 4 } },
+                    React.createElement("div", { style: { height: 8, borderRadius: 2,
+                            background: isBest ? C.green : driver.color + "88", width: `${bw}px`, minWidth: 2 } }))));
+        })),
+        React.createElement("div", { style: { padding: "6px 10px", borderTop: `1px solid ${C.border}`,
+                display: "flex", gap: 16, flexWrap: "wrap" } },
+            React.createElement("span", { style: { color: C.muted, fontSize: 10 } },
+                laps.length,
+                "\u5468 \u00B7 Best: ",
+                React.createElement("span", { style: Object.assign({ color: C.green }, mono) }, fmtLap(bestLap))),
+            (() => {
+                const b = best5min(laps);
+                return b.count > 0 && (React.createElement("span", { style: { color: C.muted, fontSize: 10 } },
+                    "5\u5206\u9593: ",
+                    React.createElement("span", { style: Object.assign({ color: C.cyan }, mono) },
+                        b.count,
+                        "\u5468 ",
+                        fmtLap(b.total))));
+            })())));
+}
+// -- LapChart --
+function LapChart({ drivers, hlId, onHl, yMin, yMax }) {
+    const active = drivers.filter(d => { var _a; return d.show && ((_a = d.laps) === null || _a === void 0 ? void 0 : _a.length); });
+    if (!active.length)
+        return React.createElement("div", { style: { textAlign: "center", color: C.muted, padding: 30, fontSize: 13 } }, "データなし");
+    const maxLap = Math.max(...active.map(d => d.laps.length));
+    const allT = active.flatMap(d => d.laps);
+    const autoMin = Math.min(...allT), autoMax = Math.max(...allT), autoPad = (autoMax - autoMin) * .12 || .5;
+    const minT = yMin != null && yMin !== "" ? Number(yMin) : autoMin - autoPad;
+    const maxT = yMax != null && yMax !== "" ? Number(yMax) : autoMax + autoPad;
+    const W = 640, H = 260, PL = 50, PR = 10, PT = 10, PB = 26, iW = W - PL - PR, iH = H - PT - PB;
+    const xp = i => PL + (i / Math.max(maxLap - 1, 1)) * iW;
+    const yp = t => PT + iH - ((t - minT) / (maxT - minT)) * iH;
+    const ticks = 5, step = (maxT - minT) / ticks;
+    return React.createElement("div", { style: { overflowX: "auto" } },
+        React.createElement("svg", { viewBox: `0 0 ${W} ${H}`, style: { width: "100%", maxWidth: W, display: "block" } },
+            Array.from({ length: ticks + 1 }, (_, i) => {
+                const t = minT + step * i, y = yp(t);
+                return React.createElement("g", { key: i },
+                    React.createElement("line", { x1: PL, y1: y, x2: W - PR, y2: y, stroke: C.border, strokeWidth: .6 }),
+                    React.createElement("text", { x: PL - 4, y: y + 4, textAnchor: "end", fontSize: 8, fill: C.muted }, t.toFixed(2)));
+            }),
+            Array.from({ length: maxLap }, (_, i) => i % Math.max(1, Math.floor(maxLap / 10)) === 0 &&
+                React.createElement("text", { key: i, x: xp(i), y: H - 4, textAnchor: "middle", fontSize: 9, fill: C.muted },
+                    "L",
+                    i + 1)),
+            active.map(d => {
+                const isHl = hlId === d.id;
+                return React.createElement("g", { key: d.id, opacity: hlId && !isHl ? .15 : 1, style: { transition: "opacity .2s" }, onClick: () => onHl(d.id), cursor: "pointer" },
+                    React.createElement("polyline", { points: d.laps.map((v, i) => `${xp(i)},${yp(v)}`).join(" "), fill: "none", stroke: d.color, strokeWidth: d.isMe ? 3 : isHl ? 2.5 : 1.4, strokeOpacity: .92 }),
+                    (d.isMe || isHl) && d.laps.map((v, i) => React.createElement("circle", { key: i, cx: xp(i), cy: yp(v), r: d.isMe ? 4 : 3, fill: d.color, opacity: .85 })));
+            })),
+        React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 10, marginTop: 6 } }, active.map(d => React.createElement("div", { key: d.id, onClick: () => onHl(d.id), style: { display: "flex", alignItems: "center", gap: 5, cursor: "pointer" } },
+            React.createElement("div", { style: { width: 20, height: d.isMe ? 3 : 2, background: d.color, borderRadius: 2 } }),
+            React.createElement("span", { style: Object.assign({ color: d.color, fontSize: 10 }, mono) },
+                d.label,
+                d.isMe ? " ★" : "")))));
+}
+// ── 5分間ランキング ────────────────────────────────
+function Ranking({ drivers }) {
+    var _a;
+    const active = drivers.filter(d => { var _a; return d.show && ((_a = d.laps) === null || _a === void 0 ? void 0 : _a.length); });
+    if (!active.length)
+        return React.createElement("div", { style: { textAlign: "center", color: C.muted, padding: 20, fontSize: 13 } }, "\u30C7\u30FC\u30BF\u306A\u3057");
+    const rows = active.map(d => (Object.assign(Object.assign({}, d), { b: best5min(d.laps) }))).sort((a, b) => b.b.count - a.b.count || a.b.total - b.b.total);
+    const maxC = ((_a = rows[0]) === null || _a === void 0 ? void 0 : _a.b.count) || 1;
+    return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } }, rows.map((d, i) => React.createElement("div", { key: d.id },
+        React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 } },
+            React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 7 } },
+                React.createElement("span", { style: Object.assign(Object.assign({ color: C.muted, fontSize: 11 }, mono), { minWidth: 20, fontWeight: 700 }) },
+                    i + 1,
+                    "."),
+                i === 0 && React.createElement("span", null, "\uD83C\uDFC6"),
+                React.createElement("span", { style: Object.assign({ color: d.color, fontWeight: 700, fontSize: 13 }, mono) },
+                    d.label,
+                    d.isMe ? " ⭐" : "")),
+            React.createElement("div", { style: { display: "flex", gap: 10, alignItems: "baseline" } },
+                React.createElement("span", { style: Object.assign({ color: C.text, fontSize: 20, fontWeight: 800 }, mono) },
+                    d.b.count,
+                    React.createElement("span", { style: { fontSize: 11, color: C.sub } }, " \u5468")),
+                React.createElement("span", { style: Object.assign({ color: C.sub, fontSize: 12 }, mono) }, fmtLap(d.b.total)))),
+        React.createElement("div", { style: { background: C.bg, borderRadius: 3, height: 8, overflow: "hidden" } },
+            React.createElement("div", { style: { width: `${(d.b.count / maxC) * 100}%`, height: "100%", background: d.color, borderRadius: 3, transition: "width .5s" } })))));
+}
+// ── ベストラップランキング ─────────────────────────
+function BestLapRanking({ drivers }) {
+    const active = drivers.filter(d => { var _a; return d.show && ((_a = d.laps) === null || _a === void 0 ? void 0 : _a.length); });
+    if (!active.length)
+        return React.createElement("div", { style: { textAlign: "center", color: C.muted, padding: 20, fontSize: 13 } }, "データなし");
+    const rows = active.map(d => {
+        const best = Math.min(...d.laps);
+        const bestIdx = d.laps.indexOf(best);
+        const avg = d.laps.reduce((a, b) => a + b, 0) / d.laps.length;
+        return Object.assign({}, d, { best, bestIdx, avg });
+    }).sort((a, b) => a.best - b.best);
+    const fastest = rows[0].best;
+    return React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+        rows.map((d, i) => {
+            const gap = d.best - fastest;
+            const barPct = fastest / d.best * 100;
+            return React.createElement("div", { key: d.id },
+                React.createElement("div", { style: { display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 4 } },
+                    React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 7 } },
+                        React.createElement("span", { style: Object.assign(Object.assign({ color: C.muted, fontSize: 11 }, mono), { minWidth: 20, fontWeight: 700 }) }, i + 1, "."),
+                        i === 0 && React.createElement("span", null, "🏆"),
+                        React.createElement("span", { style: Object.assign({ color: d.color, fontWeight: 700, fontSize: 13 }, mono) }, d.label, d.isMe ? " ★" : "")),
+                    React.createElement("div", { style: { display: "flex", gap: 10, alignItems: "baseline" } },
+                        React.createElement("span", { style: Object.assign({ color: C.text, fontSize: 18, fontWeight: 800 }, mono) }, fmtLap(d.best)),
+                        gap > 0 && React.createElement("span", { style: Object.assign({ color: C.muted, fontSize: 11 }, mono) }, "+", fmtLap(gap)),
+                        React.createElement("span", { style: Object.assign({ color: C.sub, fontSize: 10 }, mono) }, "L", d.bestIdx + 1, " / avg ", fmtLap(d.avg)))),
+                React.createElement("div", { style: { background: C.bg, borderRadius: 3, height: 6, overflow: "hidden" } },
+                    React.createElement("div", { style: { width: `${barPct}%`, height: "100%", background: d.color, borderRadius: 3, transition: "width .5s" } })));
+        }));
+}
+// ── 比較ラップ表 ────────────────────────────────
+function CompareTable({ drivers }) {
+    const active = drivers.filter(d => { var _a; return d.show && ((_a = d.laps) === null || _a === void 0 ? void 0 : _a.length); });
+    if (!active.length)
+        return null;
+    const maxLap = Math.max(...active.map(d => d.laps.length));
+    return React.createElement("div", { style: { overflowX: "auto" } },
+        React.createElement("table", { style: Object.assign(Object.assign({ borderCollapse: "collapse", fontSize: 11 }, mono), { width: "100%" }) },
+            React.createElement("thead", null,
+                React.createElement("tr", null,
+                    React.createElement("th", { style: { color: C.muted, textAlign: "left", padding: "5px 8px", fontWeight: 400,
+                            borderBottom: `1px solid ${C.border}`, position: "sticky", left: 0, background: C.card } }, "Lap"),
+                    active.map(d => React.createElement("th", { key: d.id, style: { color: d.color, padding: "5px 8px",
+                            textAlign: "right", fontWeight: 700, borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap" } },
+                        d.label.slice(0, 12),
+                        d.isMe ? " ⭐" : "")))),
+            React.createElement("tbody", null, Array.from({ length: maxLap }, (_, i) => {
+                const times = active.map(d => { var _a; return (_a = d.laps[i]) !== null && _a !== void 0 ? _a : null; });
+                const bestT = Math.min(...times.filter(v => v !== null));
+                return React.createElement("tr", { key: i, style: { borderTop: `1px solid ${C.border}` } },
+                    React.createElement("td", { style: { color: C.muted, padding: "4px 8px", position: "sticky", left: 0, background: C.card } },
+                        "L",
+                        i + 1),
+                    active.map(d => {
+                        var _a;
+                        const v = (_a = d.laps[i]) !== null && _a !== void 0 ? _a : null, isBest = v !== null && v === bestT, isPB = v !== null && v === Math.min(...d.laps);
+                        return React.createElement("td", { key: d.id, style: { padding: "4px 8px", textAlign: "right",
+                                color: v === null ? C.muted : isBest ? C.green : isPB ? C.yellow : C.text, fontWeight: isBest ? 700 : 400 } }, v != null ? v.toFixed(3) : "—");
+                    }));
+            }))),
+        React.createElement("div", { style: { display: "flex", gap: 14, marginTop: 6, fontSize: 10 } },
+            React.createElement("span", { style: { color: C.green } }, "\u25A0 \u5168\u4F53\u6700\u901F"),
+            React.createElement("span", { style: { color: C.yellow } }, "\u25A0 \u500B\u4EBA\u30D9\u30B9\u30C8")));
+}
+// ═══════════════════════════════════════════════════
+// メインアプリ
+// ═══════════════════════════════════════════════════
+// -- CrossSessionTable --
+function CrossSessionTable({ sessionGroups }) {
+    const chipMeta = {};
+    sessionGroups.forEach(sg => sg.drivers.forEach(d => {
+        if (!chipMeta[d.chipCode]) chipMeta[d.chipCode] = { label: d.label, isMe: d.isMe, color: d.color };
+    }));
+    const chips = [...new Set(sessionGroups.flatMap(sg => sg.drivers.map(d => d.chipCode)))];
+    if (!chips.length) return React.createElement("div", { style: { color: C.muted, padding: 20, textAlign: "center" } }, "データなし");
+    const sessionBests = sessionGroups.map(sg => Math.max(...sg.drivers.map(d => best5min(d.laps).count), 0));
+    const rows = chips.map(chip => {
+        const cells = sessionGroups.map(sg => {
+            const d = sg.drivers.find(d => d.chipCode === chip);
+            return d ? best5min(d.laps) : null;
+        });
+        return { chip, cells, meta: chipMeta[chip], best: Math.max(...cells.map(c => c ? c.count : 0)) };
+    }).sort((a, b) => b.best - a.best);
+    return React.createElement("div", { style: { overflowX: "auto" } },
+        React.createElement("table", { style: Object.assign({ borderCollapse: "collapse", fontSize: 11, width: "100%", minWidth: 300 }, mono) },
+            React.createElement("thead", null,
+                React.createElement("tr", null,
+                    React.createElement("th", { style: { color: C.muted, textAlign: "left", padding: "6px 10px", fontWeight: 400, borderBottom: `1px solid ${C.border}`, position: "sticky", left: 0, background: C.card, minWidth: 100 } }, "ドライバー"),
+                    sessionGroups.map((sg, si) => React.createElement("th", { key: si, style: { color: C.cyan, padding: "6px 10px", textAlign: "center", fontWeight: 700, borderBottom: `1px solid ${C.border}`, whiteSpace: "nowrap" } }, sg.label))
+                )
+            ),
+            React.createElement("tbody", null,
+                rows.map(({ chip, cells, meta }) =>
+                    React.createElement("tr", { key: chip, style: { borderTop: `1px solid ${C.border}` } },
+                        React.createElement("td", { style: { padding: "5px 10px", position: "sticky", left: 0, background: C.card, color: meta.color, fontWeight: meta.isMe ? 700 : 500, whiteSpace: "nowrap" } },
+                            meta.label, meta.isMe ? " ★" : ""),
+                        cells.map((b, ci) => {
+                            if (!b || b.count === 0) return React.createElement("td", { key: ci, style: { padding: "5px 10px", textAlign: "center", color: C.muted } }, "-");
+                            const isTop = b.count === sessionBests[ci] && b.count > 0;
+                            return React.createElement("td", { key: ci, style: { padding: "5px 10px", textAlign: "center", background: isTop ? C.green + "22" : "transparent" } },
+                                React.createElement("div", { style: { color: isTop ? C.green : C.text, fontWeight: isTop ? 700 : 400, fontSize: 14 } }, `${b.count}周`),
+                                React.createElement("div", { style: { color: C.muted, fontSize: 10 } }, fmtLap(b.total))
+                            );
+                        })
+                    )
+                )
+            )
+        ),
+        React.createElement("div", { style: { display: "flex", gap: 14, marginTop: 6, fontSize: 10 } },
+            React.createElement("span", { style: { color: C.green } }, "■ セッション内最多")
+        )
+    );
+}
+// -- localStorage helpers --
+function loadLS(key, def) { try { const v = localStorage.getItem(key); return v != null ? JSON.parse(v) : def; } catch { return def; } }
+function saveLS(key, val) { try { localStorage.setItem(key, JSON.stringify(val)); } catch {} }
+// -- App --
+function App() {
+    const { useState, useMemo } = React;
+    const [myChips, setMyChipsRaw] = useState(() => loadLS('lm_myChips', [{ code: "", name: "" }]));
+    const setMyChips = v => { const nv = typeof v === 'function' ? v(myChips) : v; setMyChipsRaw(nv); saveLS('lm_myChips', nv); };
+    const [courses, setCoursesRaw] = useState(() => loadLS('lm_courses', []));
+    const setCourses = v => { const nv = typeof v === 'function' ? v(courses) : v; setCoursesRaw(nv); saveLS('lm_courses', nv); };
+    const [rivalNames, setRivalNamesRaw] = useState(() => loadLS('lm_rivals', {}));
+    const setRivalNames = v => { const nv = typeof v === 'function' ? v(rivalNames) : v; setRivalNamesRaw(nv); saveLS('lm_rivals', nv); };
+    const [locId, setLocId] = useState(() => loadLS('lm_courses', [])[0]?.id || "");
+    const [activities, setActivities] = useState([]);
+    const [lapMap, setLapMap] = useState({});
+    const [loadingActs, setLoadingActs] = useState(false);
+    const [loadingLaps, setLoadingLaps] = useState(false);
+    const [progress, setProgress] = useState("");
+    const [error, setError] = useState("");
+    const today = new Date().toISOString().slice(0, 10);
+    const [filterDate, setFilterDate] = useState(today);
+    const [mpHourFrom, setMpHourFrom] = useState("09");
+    const [mpHourTo, setMpHourTo] = useState("20");
+    const [mpSlots, setMpSlots] = useState([
+        { on: true, from: "42", to: "48" },
+        { on: false, from: "50", to: "56" },
+        { on: false, from: "10", to: "16" },
+    ]);
+    const [minRunMin, setMinRun] = useState(4);
+    const [showOverride, setShowOverride] = useState({});
+    const [tab, setTab] = useState("5min");
+    const [hlId, setHlId] = useState(null);
+    const [selSession, setSelSession] = useState(null);
+    const [chartYMin, setChartYMin] = useState("");
+    const [chartYMax, setChartYMax] = useState("");
+    const [settingsOpen, setSettingsOpen] = useState(false);
+    const [settingsTab, setSettingsTab] = useState("courses");
+    const [newCourseId, setNewCourseId] = useState("");
+    const [newCourseName, setNewCourseName] = useState("");
+    const [editRivalCode, setEditRivalCode] = useState("");
+    const [editRivalName, setEditRivalName] = useState("");
+
+    async function fetchActivities() {
+        var _a;
+        setLoadingActs(true);
+        setError("");
+        setProgress("一覧を取得中…");
+        try {
+            let all = [], offset = 0;
+            const targetDate = filterDate;
+            while (true) {
+                setProgress(`一覧取得中… ${all.length}件`);
+                const url = `https://practice-api.speedhive.com/api/v1/locations/${locId}/activities?count=100&offset=${offset}`;
+                const data = await speedhiveFetch(url);
+                const acts = data.activities || [];
+                if (!acts.length) break;
+                const dayActs = acts.filter(a => { var _a; return (_a = a.startTime) === null || _a === void 0 ? void 0 : _a.startsWith(targetDate); });
+                all = [...all, ...dayActs];
+                const oldest = ((_a = acts[acts.length - 1]) === null || _a === void 0 ? void 0 : _a.startTime) || "";
+                if (oldest < targetDate) break;
+                if (acts.length < 100) break;
+                offset += 100;
+            }
+            setActivities(all);
+            setProgress(`✓ ${filterDate} の ${all.length}件取得完了`);
+        } catch (e) {
+            setError('取得エラー: ' + e.message + ' | PROXY=' + PROXY);
+            setProgress("");
+        } finally {
+            setLoadingActs(false);
+        }
+    }
+
+    async function fetchLapsForRange() {
+        if (!activities.length) return;
+        const targets = activities.filter(a => { var _a; return (_a = a.startTime) === null || _a === void 0 ? void 0 : _a.startsWith(filterDate); });
+        if (!targets.length) {
+            setError("指定した日付のデータがありません");
+            return;
+        }
+        setLoadingLaps(true);
+        setError("");
+        const newMap = Object.assign({}, lapMap);
+        for (let i = 0; i < targets.length; i++) {
+            const act = targets[i];
+            if (newMap[act.id]) continue;
+            setProgress(`ラップ取得中… ${i + 1}/${targets.length} (${act.chipLabel || act.chipCode})`);
+            try {
+                const url = `https://practice-api.speedhive.com/api/v1/training/activities/${act.id}/sessions`;
+                const data = await speedhiveFetch(url);
+                newMap[act.id] = data;
+                setLapMap(Object.assign({}, newMap));
+            } catch (e) {
+                console.warn(`${act.id} failed:`, e.message);
+            }
+        }
+        setProgress(`✓ ラップ取得完了`);
+        setLoadingLaps(false);
+    }
+
+    const sessionGroups = useMemo(() => {
+        if (!activities.length) return [];
+        const groups = [];
+        for (let h = parseInt(mpHourFrom); h < parseInt(mpHourTo); h++) {
+            const hStr = String(h).padStart(2, "0");
+            for (let si = 0; si < mpSlots.length; si++) {
+                const slot = mpSlots[si];
+                if (!slot.on) continue;
+                const rangeFrom = hmToDate(filterDate, `${hStr}:${slot.from}`);
+                const rangeTo = hmToDate(filterDate, `${hStr}:${slot.to}`);
+                const label = `${hStr}:${slot.from}~${hStr}:${slot.to}`;
+                const sessionDrivers = activities.map((act, idx) => {
+                    const lapData = lapMap[act.id];
+                    if (!lapData?.sessions) return null;
+                    const allRaw = lapData.sessions.flatMap(s => s.laps || [])
+                        .sort((a, b) => new Date(a.dateTimeStart) - new Date(b.dateTimeStart));
+                    if (!sessionOverlap(allRaw, rangeFrom, rangeTo, minRunMin * 60)) return null;
+                    const filteredRaw = allRaw.filter(l => {
+                        const ls = new Date(l.dateTimeStart);
+                        return ls >= rangeFrom && ls < new Date(rangeTo.getTime() + 120000);
+                    });
+                    const laps = filteredRaw.map(l => parseFloat(l.duration)).filter(v => v > 0 && v < 300);
+                    if (!laps.length) return null;
+                    const isMe = myChips.some(c => c.code === act.chipCode);
+                    const myChipInfo = myChips.find(c => c.code === act.chipCode);
+                    const chipName = rivalNames[act.chipCode];
+                    const dLabel = isMe ? (myChipInfo?.name || act.chipLabel || act.chipCode) : (chipName || act.chipLabel || act.chipCode || String(act.id));
+                    return {
+                        id: `${act.id}_${h}_${si}`, actId: act.id,
+                        label: dLabel, chipCode: act.chipCode, laps, rawLaps: filteredRaw,
+                        totalSec: laps.reduce((a, b) => a + b, 0),
+                        bestLap: Math.min(...laps), isMe,
+                        color: isMe ? C.accent : PAL[idx % PAL.length],
+                        show: showOverride[act.id] ?? true,
+                    };
+                }).filter(Boolean);
+                if (sessionDrivers.length > 0) groups.push({ h, si, slotLabel: `枠${si + 1}`, label, drivers: sessionDrivers });
+            }
+        }
+        return groups;
+    }, [activities, lapMap, filterDate, mpHourFrom, mpHourTo, mpSlots, minRunMin, myChips, rivalNames, showOverride]);
+
+    const lapFetched = Object.keys(lapMap).length;
+    const needFetch = activities.filter(a => { var _a; return ((_a = a.startTime) === null || _a === void 0 ? void 0 : _a.startsWith(filterDate)) && !lapMap[a.id]; }).length;
+
+    return (React.createElement("div", { style: { minHeight: "100vh", background: C.bg, color: C.text, fontFamily: "'Inter','Helvetica Neue',sans-serif" } },
+        React.createElement("div", { style: { background: C.surf, borderBottom: `1px solid ${C.border}`, padding: "12px 16px", display: "flex", alignItems: "center", gap: 12, flexWrap: "wrap" } },
+            React.createElement("div", { style: { width: 32, height: 32, background: C.accent, borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "center", fontSize: 17, flexShrink: 0 } }, "🏎"),
+            React.createElement("div", { style: { flex: 1 } },
+                React.createElement("div", { style: { fontWeight: 800, fontSize: 15 } }, "RC Lap Manager"),
+                React.createElement("div", { style: { color: C.muted, fontSize: 10 } }, "Speedhive Practice · 5分間ベスト比較")),
+            React.createElement(Chip, { color: C.accent }, "★ ", myChips[0]?.name || myChips[0]?.code || "")),
+        React.createElement("div", { style: { maxWidth: 900, margin: "0 auto", padding: "14px 12px", display: "flex", flexDirection: "column", gap: 12 } },
+            React.createElement(Card, null,
+                React.createElement("div", { onClick: () => setSettingsOpen(o => !o), style: { display: "flex", justifyContent: "space-between", alignItems: "center", cursor: "pointer", userSelect: "none", marginBottom: settingsOpen ? 12 : 0 } },
+                    React.createElement(Lbl, null, "設定 登録データ・設定"),
+                    React.createElement("span", { style: { color: C.sub, fontSize: 14 } }, settingsOpen ? "▲" : "▼")),
+                settingsOpen && React.createElement("div", null,
+                    React.createElement("div", { style: { display: "flex", gap: 4, marginBottom: 12 } },
+                        [["courses", "コース"], ["mychips", "自分"], ["rivals", "ライバル"]].map(([k, lbl]) =>
+                            React.createElement("button", { key: k, onClick: () => setSettingsTab(k), style: Object.assign({ padding: "5px 12px", borderRadius: 5, fontSize: 11, fontWeight: 700, cursor: "pointer", background: settingsTab === k ? C.cyan + "33" : C.bg, color: settingsTab === k ? C.cyan : C.sub, border: `1px solid ${settingsTab === k ? C.cyan + "66" : C.border}` }, mono) }, lbl))),
+                    settingsTab === "courses" && React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+                        React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+                            React.createElement("span", { style: { color: C.sub, fontSize: 10 } }, "使用中:"),
+                            React.createElement("span", { style: Object.assign({ color: C.accent, fontWeight: 700, fontSize: 13 }, mono) }, courses.find(c => c.id === locId)?.name || locId),
+                            React.createElement("input", { value: locId, onChange: e => setLocId(e.target.value), placeholder: "ID直入力", style: Object.assign({ background: C.bg, border: `1px solid ${C.border}`, borderRadius: 5, color: C.text, padding: "4px 8px", fontSize: 11, outline: "none", width: 100 }, mono) })),
+                        courses.map((c, ci) => React.createElement("div", { key: ci, style: { display: "flex", alignItems: "center", gap: 6, background: c.id === locId ? C.accent + "11" : C.bg, border: `1px solid ${c.id === locId ? C.accent + "44" : C.border}`, borderRadius: 6, padding: "6px 10px" } },
+                            React.createElement("button", { onClick: () => setLocId(c.id), style: Object.assign({ background: c.id === locId ? C.accent : C.surf, color: c.id === locId ? "#000" : C.sub, border: "none", borderRadius: 4, padding: "3px 8px", fontSize: 10, cursor: "pointer", fontWeight: 700 }, mono) }, "選択"),
+                            React.createElement("span", { style: Object.assign({ color: C.text, fontSize: 12, flex: 1 }, mono) }, c.name),
+                            React.createElement("span", { style: Object.assign({ color: C.muted, fontSize: 10 }, mono) }, c.id),
+                            React.createElement("button", { onClick: () => setCourses(cs => cs.filter((_, i) => i !== ci)), style: { background: "transparent", border: "none", color: C.red, cursor: "pointer", fontSize: 14, padding: "0 4px" } }, "×"))),
+                        React.createElement("div", { style: { display: "flex", gap: 6 } },
+                            React.createElement("input", { value: newCourseId, onChange: e => setNewCourseId(e.target.value), placeholder: "ID (1446など)", style: Object.assign({ flex: 1, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 5, color: C.text, padding: "5px 8px", fontSize: 11, outline: "none" }, mono) }),
+                            React.createElement("input", { value: newCourseName, onChange: e => setNewCourseName(e.target.value), placeholder: "名前", style: Object.assign({ flex: 2, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 5, color: C.text, padding: "5px 8px", fontSize: 11, outline: "none" }, mono) }),
+                            React.createElement(Btn, { sm: true, onClick: () => { if (newCourseId && newCourseName) { setCourses(cs => [...cs, { id: newCourseId.trim(), name: newCourseName.trim() }]); setNewCourseId(""); setNewCourseName(""); } } }, "追加"))),
+                    settingsTab === "mychips" && React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+                        myChips.map((chip, ci) => React.createElement("div", { key: ci, style: { display: "flex", gap: 6, alignItems: "center", background: C.bg, border: `1px solid ${C.accent}44`, borderRadius: 6, padding: "8px 10px" } },
+                            React.createElement("span", { style: Object.assign({ color: C.accent, fontSize: 11, fontWeight: 700, minWidth: 24 }, mono) }, `#${ci + 1}`),
+                            React.createElement("input", { value: chip.name, onChange: e => setMyChips(cs => cs.map((c, i) => i === ci ? Object.assign({}, c, { name: e.target.value }) : c)), placeholder: "名前 (1号車など)", style: Object.assign({ flex: 1, background: C.surf, border: `1px solid ${C.accent}44`, borderRadius: 5, color: C.accent, padding: "5px 8px", fontSize: 12, fontWeight: 700, outline: "none" }, mono) }),
+                            React.createElement("input", { value: chip.code, onChange: e => setMyChips(cs => cs.map((c, i) => i === ci ? Object.assign({}, c, { code: e.target.value }) : c)), placeholder: "ポンダーコード", style: Object.assign({ flex: 1, background: C.surf, border: `1px solid ${C.border}`, borderRadius: 5, color: C.text, padding: "5px 8px", fontSize: 12, outline: "none" }, mono) }),
+                            React.createElement("button", { onClick: () => setMyChips(cs => cs.filter((_, i) => i !== ci)), style: { background: "transparent", border: "none", color: C.red, cursor: "pointer", fontSize: 14, padding: "0 4px" } }, "×"))),
+                        myChips.length < 3 && React.createElement(Btn, { sm: true, v: "secondary", onClick: () => setMyChips(cs => [...cs, { code: "", name: `${cs.length + 1}号車` }]) }, "+ 自車追加")),
+                    settingsTab === "rivals" && React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
+                        Object.entries(rivalNames).map(([code, name]) => React.createElement("div", { key: code, style: { display: "flex", gap: 6, alignItems: "center", background: C.bg, border: `1px solid ${C.border}`, borderRadius: 6, padding: "6px 10px" } },
+                            React.createElement("span", { style: Object.assign({ color: C.cyan, fontSize: 12, flex: 1 }, mono) }, name),
+                            React.createElement("span", { style: Object.assign({ color: C.muted, fontSize: 10 }, mono) }, code),
+                            React.createElement("button", { onClick: () => setRivalNames(r => { const n = Object.assign({}, r); delete n[code]; return n; }), style: { background: "transparent", border: "none", color: C.red, cursor: "pointer", fontSize: 13, padding: "0 4px" } }, "×"))),
+                        React.createElement("div", { style: { display: "flex", gap: 6 } },
+                            React.createElement("input", { value: editRivalCode, onChange: e => setEditRivalCode(e.target.value), placeholder: "ポンダーコード", style: Object.assign({ flex: 1, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 5, color: C.text, padding: "5px 8px", fontSize: 11, outline: "none" }, mono) }),
+                            React.createElement("input", { value: editRivalName, onChange: e => setEditRivalName(e.target.value), placeholder: "名前", style: Object.assign({ flex: 2, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 5, color: C.text, padding: "5px 8px", fontSize: 11, outline: "none" }, mono) }),
+                            React.createElement(Btn, { sm: true, onClick: () => { if (editRivalCode && editRivalName) { setRivalNames(r => Object.assign({}, r, { [editRivalCode.trim()]: editRivalName.trim() })); setEditRivalCode(""); setEditRivalName(""); } } }, "登録"))))),
+            React.createElement(Card, null,
+                React.createElement(Lbl, null, "📥 データ取得"),
+                React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } },
+                    React.createElement("div", { style: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" } },
+                        React.createElement(Btn, { onClick: fetchActivities, disabled: loadingActs || loadingLaps, style: { minWidth: 200 } }, loadingActs ? React.createElement(React.Fragment, null, React.createElement(Spin, { size: 14 }), "取得中…") : "① トランスポンダー一覧を取得"),
+                        activities.length > 0 && React.createElement("span", { style: Object.assign({ color: C.cyan, fontSize: 12 }, mono) }, "✓ ", activities.length, "台")),
+                    React.createElement("div", { style: { display: "flex", gap: 10, alignItems: "center", flexWrap: "wrap" } },
+                        React.createElement(Btn, { onClick: fetchLapsForRange, disabled: loadingLaps || loadingActs || !activities.length, style: { minWidth: 200 } }, loadingLaps ? React.createElement(React.Fragment, null, React.createElement(Spin, { size: 14 }), "取得中…") : "② ラップデータを取得"),
+                        lapFetched > 0 && React.createElement("span", { style: Object.assign({ color: C.cyan, fontSize: 12 }, mono) }, "✓ ", lapFetched, "件取得済"),
+                        needFetch > 0 && React.createElement("span", { style: { color: C.yellow, fontSize: 11 } }, "(", needFetch, "件未取得)")),
+                    progress && React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, color: progress.startsWith("✓") ? C.green : C.sub, fontSize: 12 } },
+                        !progress.startsWith("✓") && React.createElement(Spin, { size: 13 }),
+                        progress),
+                    error && React.createElement("div", { style: { background: "#1a0808", border: `1px solid ${C.red}44`, borderRadius: 7, padding: "8px 12px", fontSize: 11, color: C.red } }, "⚠ ", error),
+                    activities.length > 0 && React.createElement(Btn, { onClick: () => { setActivities([]); setLapMap({}); setProgress(""); }, v: "danger", sm: true }, "🗑 データをクリア"))),
+            React.createElement(Card, null,
+                React.createElement(Lbl, null, "⏱ 表示する日時・設定枠"),
+                React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } },
+                    React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
+                        React.createElement("span", { style: { color: C.sub, fontSize: 11, width: 36, flexShrink: 0 } }, "日付"),
+                        React.createElement("input", { type: "date", value: filterDate, onChange: e => setFilterDate(e.target.value), style: Object.assign(Object.assign({ flex: 1, background: C.bg, border: `1px solid ${C.accent}`, borderRadius: 6, color: C.accent, padding: "7px 10px", fontSize: 13 }, mono), { outline: "none", fontWeight: 700 }) })),
+                    React.createElement("div", { style: { background: C.bg, border: `1px solid ${C.cyan}55`, borderRadius: 8, padding: "12px" } },
+                        React.createElement("div", { style: { color: C.cyan, fontSize: 11, fontWeight: 700, marginBottom: 8 } }, "時間帯 (時)"),
+                        React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 12 } },
+                            React.createElement("div", null,
+                                React.createElement("div", { style: { color: C.sub, fontSize: 9, marginBottom: 3 } }, "開始"),
+                                React.createElement("select", { value: parseInt(mpHourFrom), onChange: e => setMpHourFrom(String(e.target.value).padStart(2, "0")), style: Object.assign(Object.assign({ width: "100%", background: C.surf, border: `1px solid ${C.cyan}66`, borderRadius: 5, color: C.cyan, padding: "6px 8px", fontSize: 13, fontWeight: 700 }, mono), { outline: "none", boxSizing: "border-box", cursor: "pointer" }) },
+                                    Array.from({ length: 24 }, (_, h) => React.createElement("option", { key: h, value: h }, `${String(h).padStart(2, "0")}時`)))),
+                            React.createElement("div", null,
+                                React.createElement("div", { style: { color: C.sub, fontSize: 9, marginBottom: 3 } }, "終了"),
+                                React.createElement("select", { value: parseInt(mpHourTo), onChange: e => setMpHourTo(String(e.target.value).padStart(2, "0")), style: Object.assign(Object.assign({ width: "100%", background: C.surf, border: `1px solid ${C.cyan}66`, borderRadius: 5, color: C.cyan, padding: "6px 8px", fontSize: 13, fontWeight: 700 }, mono), { outline: "none", boxSizing: "border-box", cursor: "pointer" }) },
+                                    Array.from({ length: 24 }, (_, h) => React.createElement("option", { key: h + 1, value: h + 1 }, `${String(h + 1).padStart(2, "0")}時`))))),
+                        React.createElement("div", { style: { color: C.yellow, fontSize: 11, fontWeight: 700, marginBottom: 8 } }, "設定枠 (毎時 XX分～XX分)"),
+                        React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 6 } },
+                            mpSlots.map((slot, si) => {
+                                const slotColors = ["#00cfff", "#ffd740", "#e040fb"];
+                                const sc = slotColors[si];
+                                return React.createElement("div", { key: si, style: { background: slot.on ? C.surf : C.muted + "11", border: `1px solid ${slot.on ? sc + "66" : C.border}`, borderRadius: 7, padding: "8px 10px" } },
+                                    React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8, marginBottom: slot.on ? 8 : 0 } },
+                                        React.createElement("div", { onClick: () => setMpSlots(ss => ss.map((s, i) => i === si ? Object.assign({}, s, { on: !s.on }) : s)), style: { width: 36, height: 20, borderRadius: 10, background: slot.on ? sc : C.muted, position: "relative", cursor: "pointer", flexShrink: 0 } },
+                                            React.createElement("div", { style: { position: "absolute", top: 3, left: slot.on ? 18 : 3, width: 14, height: 14, borderRadius: "50%", background: "#fff", transition: "left .2s" } })),
+                                        React.createElement("span", { style: Object.assign({ color: slot.on ? sc : C.muted, fontWeight: 700, fontSize: 12 }, mono) }, `枠${si + 1}`),
+                                        slot.on && React.createElement("span", { style: Object.assign({ color: C.sub, fontSize: 10, marginLeft: "auto" }, mono) }, `:${slot.from}~:${slot.to}`)),
+                                    slot.on && React.createElement("div", { style: { display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 } },
+                                        React.createElement("div", null,
+                                            React.createElement("div", { style: { color: C.sub, fontSize: 9, marginBottom: 3 } }, "開始 (分)"),
+                                            React.createElement("select", { value: parseInt(slot.from), onChange: e => setMpSlots(ss => ss.map((s, i) => i === si ? Object.assign({}, s, { from: String(e.target.value).padStart(2, "0") }) : s)), style: Object.assign(Object.assign({ width: "100%", background: C.bg, border: `1px solid ${sc}66`, borderRadius: 5, color: sc, padding: "5px 8px", fontSize: 13, fontWeight: 700 }, mono), { outline: "none", boxSizing: "border-box", cursor: "pointer" }) },
+                                                Array.from({ length: 59 }, (_, m) => React.createElement("option", { key: m, value: m }, `${String(m).padStart(2, "0")}分`)))),
+                                        React.createElement("div", null,
+                                            React.createElement("div", { style: { color: C.sub, fontSize: 9, marginBottom: 3 } }, "終了 (分)"),
+                                            React.createElement("select", { value: parseInt(slot.to), onChange: e => setMpSlots(ss => ss.map((s, i) => i === si ? Object.assign({}, s, { to: String(e.target.value).padStart(2, "0") }) : s)), style: Object.assign(Object.assign({ width: "100%", background: C.bg, border: `1px solid ${sc}66`, borderRadius: 5, color: sc, padding: "5px 8px", fontSize: 13, fontWeight: 700 }, mono), { outline: "none", boxSizing: "border-box", cursor: "pointer" }) },
+                                                Array.from({ length: 59 }, (_, m) => React.createElement("option", { key: m + 1, value: m + 1 }, `${String(m + 1).padStart(2, "0")}分`))))));
+                            })))),
+                    React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 10 } },
+                        React.createElement("span", { style: { color: C.sub, fontSize: 11, width: 52, flexShrink: 0 } }, "最低走行"),
+                        React.createElement("input", { type: "range", min: 0, max: 10, value: minRunMin, onChange: e => setMinRun(Number(e.target.value)), style: { flex: 1, accentColor: C.green, height: 4 } }),
+                        React.createElement("div", { style: Object.assign(Object.assign({}, mono), { background: C.bg, border: `1px solid ${C.green}`, borderRadius: 6, padding: "3px 10px", color: C.green, fontWeight: 800, fontSize: 15, minWidth: 42, textAlign: "center" }) }, minRunMin),
+                        React.createElement("span", { style: { color: C.sub, fontSize: 11, minWidth: 32 } }, "分以上"))),
+            sessionGroups.length > 0 && React.createElement(Card, { style: { padding: 0, overflow: "hidden" } },
+                React.createElement("div", { style: { display: "flex", borderBottom: `1px solid ${C.border}`, overflowX: "auto" } },
+                    React.createElement("button", { onClick: () => setSelSession(null), style: Object.assign({ padding: "11px 14px", border: "none", cursor: "pointer", fontSize: 11, fontWeight: selSession === null ? 700 : 400, color: selSession === null ? C.accent : C.sub, background: selSession === null ? C.card : "transparent", borderBottom: `2px solid ${selSession === null ? C.accent : "transparent"}`, whiteSpace: "nowrap" }, mono) }, "セッション横断"),
+                    sessionGroups.map((sg, i) => React.createElement("button", { key: sg.label, onClick: () => setSelSession(i), style: Object.assign({ padding: "11px 14px", border: "none", cursor: "pointer", fontSize: 11, fontWeight: selSession === i ? 700 : 400, color: selSession === i ? C.cyan : C.sub, background: selSession === i ? C.card : "transparent", borderBottom: `2px solid ${selSession === i ? C.cyan : "transparent"}`, whiteSpace: "nowrap" }, mono) }, sg.label, " (", sg.drivers.length, "台)"))),
+                React.createElement("div", { style: { padding: 16 } },
+                    selSession === null && React.createElement(CrossSessionTable, { sessionGroups: sessionGroups }),
+                    selSession !== null && sessionGroups[selSession] && React.createElement(React.Fragment, null,
+                        React.createElement("div", { style: { display: "flex", borderBottom: `1px solid ${C.border}`, marginBottom: 14 } },
+                            [{ key: "5min", label: "5分間" }, { key: "best", label: "ベストラップ" }, { key: "chart", label: "チャート" }, { key: "table", label: "ラップ表" }].map(t =>
+                                React.createElement("button", { key: t.key, onClick: () => setTab(t.key), style: Object.assign({ flex: 1, padding: "8px 4px", border: "none", cursor: "pointer", background: tab === t.key ? C.surf : "transparent", color: tab === t.key ? C.cyan : C.muted, fontWeight: tab === t.key ? 700 : 400, fontSize: 11, borderBottom: `2px solid ${tab === t.key ? C.cyan : "transparent"}` }, mono) }, t.label))),
+                        tab === "chart" && React.createElement("div", { style: { display: "flex", gap: 8, alignItems: "center", marginBottom: 10 } },
+                            React.createElement("span", { style: { color: C.sub, fontSize: 10 } }, "Y軸"),
+                            React.createElement("input", { type: "number", value: chartYMin, onChange: e => setChartYMin(e.target.value), placeholder: "最小 (自動)", style: Object.assign({ width: 90, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 5, color: C.text, padding: "4px 8px", fontSize: 11, outline: "none" }, mono) }),
+                            React.createElement("span", { style: { color: C.muted, fontSize: 11 } }, "~"),
+                            React.createElement("input", { type: "number", value: chartYMax, onChange: e => setChartYMax(e.target.value), placeholder: "最大 (自動)", style: Object.assign({ width: 90, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 5, color: C.text, padding: "4px 8px", fontSize: 11, outline: "none" }, mono) }),
+                            React.createElement("button", { onClick: () => { setChartYMin(""); setChartYMax(""); }, style: { background: "transparent", border: "none", color: C.muted, cursor: "pointer", fontSize: 11, padding: "4px 6px" } }, "リセット")),
+                        tab === "5min" && React.createElement(Ranking, { drivers: sessionGroups[selSession].drivers }),
+                        tab === "best" && React.createElement(BestLapRanking, { drivers: sessionGroups[selSession].drivers }),
+                        tab === "chart" && React.createElement(LapChart, { drivers: sessionGroups[selSession].drivers, hlId: hlId, onHl: id => setHlId(p => p === id ? null : id), yMin: chartYMin, yMax: chartYMax }),
+                        tab === "table" && React.createElement(CompareTable, { drivers: sessionGroups[selSession].drivers })))),
+            !activities.length && React.createElement("div", { style: { textAlign: "center", padding: "40px 0", color: C.muted } },
+                React.createElement("div", { style: { fontSize: 32, marginBottom: 10 } }, "🏁"),
+                React.createElement("div", { style: { fontSize: 13, color: C.sub } }, "「① トランスポンダー一覧を取得」を押してください")),
+            activities.length > 0 && lapFetched > 0 && sessionGroups.length === 0 && React.createElement("div", { style: { textAlign: "center", padding: "20px 0", color: C.muted, fontSize: 13 } }, "設定枠の時間帯にラップデータがありません。設定枠または日付を変更してください。"),
+            React.createElement("div", { style: { textAlign: "center", color: C.muted, fontSize: 10, paddingBottom: 16 } }, "practice-api.speedhive.com · ★ = ", myChips.map(c => c.name || c.code).join(" / ")))));
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(React.createElement(App));
+</script>
+</body>
+</html>
