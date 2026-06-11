@@ -40,8 +40,9 @@ const PAL = [
 ];
 const mono = { fontFamily: "'JetBrains Mono',ui-monospace,monospace" };
 // ── Cloudflare Worker経由でSpeedhive APIを叩く ──────────
-const PROXY = "https://raspy-limit-edb3.neruson5757.workers.dev";
+let PROXY = loadLS('lm_proxyUrl', "");
 async function speedhiveFetch(url) {
+    if (!PROXY) throw new Error("プロキシURLが未設定です（設定 → 接続 で入力してください）");
     const res = await fetch(`${PROXY}?url=${encodeURIComponent(url)}`);
     if (!res.ok)
         throw new Error(`HTTP ${res.status}`);
@@ -371,6 +372,8 @@ function App() {
     const setCourses = v => { const nv = typeof v === 'function' ? v(courses) : v; setCoursesRaw(nv); saveLS('lm_courses', nv); };
     const [rivalNames, setRivalNamesRaw] = useState(() => loadLS('lm_rivals', {}));
     const setRivalNames = v => { const nv = typeof v === 'function' ? v(rivalNames) : v; setRivalNamesRaw(nv); saveLS('lm_rivals', nv); };
+    const [proxyUrl, setProxyUrlRaw] = useState(() => loadLS('lm_proxyUrl', ""));
+    const setProxyUrl = v => { setProxyUrlRaw(v); saveLS('lm_proxyUrl', v); PROXY = v; };
     const [locId, setLocId] = useState(() => loadLS('lm_courses', [])[0]?.id || "");
     const [activities, setActivities] = useState([]);
     const [lapMap, setLapMap] = useState({});
@@ -425,7 +428,7 @@ function App() {
             setActivities(all);
             setProgress(`✓ ${filterDate} の ${all.length}件取得完了`);
         } catch (e) {
-            setError('取得エラー: ' + e.message + ' | PROXY=' + PROXY);
+            setError('取得エラー: ' + e.message);
             setProgress("");
         } finally {
             setLoadingActs(false);
@@ -518,7 +521,7 @@ function App() {
                     React.createElement("span", { style: { color: C.sub, fontSize: 14 } }, settingsOpen ? "▲" : "▼")),
                 settingsOpen && React.createElement("div", null,
                     React.createElement("div", { style: { display: "flex", gap: 4, marginBottom: 12 } },
-                        [["courses", "コース"], ["mychips", "自分"], ["rivals", "ライバル"]].map(([k, lbl]) =>
+                        [["courses", "コース"], ["mychips", "自分"], ["rivals", "ライバル"], ["proxy", "接続"]].map(([k, lbl]) =>
                             React.createElement("button", { key: k, onClick: () => setSettingsTab(k), style: Object.assign({ padding: "5px 12px", borderRadius: 5, fontSize: 11, fontWeight: 700, cursor: "pointer", background: settingsTab === k ? C.cyan + "33" : C.bg, color: settingsTab === k ? C.cyan : C.sub, border: `1px solid ${settingsTab === k ? C.cyan + "66" : C.border}` }, mono) }, lbl))),
                     settingsTab === "courses" && React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
                         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
@@ -549,7 +552,14 @@ function App() {
                         React.createElement("div", { style: { display: "flex", gap: 6 } },
                             React.createElement("input", { value: editRivalCode, onChange: e => setEditRivalCode(e.target.value), placeholder: "ポンダーコード", style: Object.assign({ flex: 1, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 5, color: C.text, padding: "5px 8px", fontSize: 11, outline: "none" }, mono) }),
                             React.createElement("input", { value: editRivalName, onChange: e => setEditRivalName(e.target.value), placeholder: "名前", style: Object.assign({ flex: 2, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 5, color: C.text, padding: "5px 8px", fontSize: 11, outline: "none" }, mono) }),
-                            React.createElement(Btn, { sm: true, onClick: () => { if (editRivalCode && editRivalName) { setRivalNames(r => Object.assign({}, r, { [editRivalCode.trim()]: editRivalName.trim() })); setEditRivalCode(""); setEditRivalName(""); } } }, "登録"))))),
+                            React.createElement(Btn, { sm: true, onClick: () => { if (editRivalCode && editRivalName) { setRivalNames(r => Object.assign({}, r, { [editRivalCode.trim()]: editRivalName.trim() })); setEditRivalCode(""); setEditRivalName(""); } } }, "登録"))),
+                    settingsTab === "proxy" && React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } },
+                        React.createElement("div", { style: { color: C.sub, fontSize: 11, lineHeight: 1.6 } }, "SpeedHive APIへ接続するためのプロキシURL（Cloudflare Workerなど）を入力してください。"),
+                        React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center" } },
+                            React.createElement("input", { value: proxyUrl, onChange: e => setProxyUrl(e.target.value), placeholder: "https://your-worker.example.com", style: Object.assign({ flex: 1, background: C.bg, border: `1px solid ${proxyUrl ? C.green + "88" : C.border}`, borderRadius: 5, color: C.text, padding: "6px 10px", fontSize: 12, outline: "none" }, mono) })),
+                        proxyUrl
+                            ? React.createElement("div", { style: { color: C.green, fontSize: 11 } }, "✓ 設定済み")
+                            : React.createElement("div", { style: { color: C.yellow, fontSize: 11 } }, "⚠ 未設定 — データを取得できません")))),
             React.createElement(Card, null,
                 React.createElement(Lbl, null, "📥 データ取得"),
                 React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } },
