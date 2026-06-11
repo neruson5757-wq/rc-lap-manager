@@ -2,7 +2,7 @@
   "name": "RC Lap Manager",
   "short_name": "RC Lap",
   "description": "Speedhive Practice ラップタイム分析ツール",
-  "start_url": "./yatabe-lapanalyzer.html",
+  "start_url": "./start_url": "./index.html",
   "display": "standalone",
   "background_color": "#090b0f",
   "theme_color": "#090b0f",
