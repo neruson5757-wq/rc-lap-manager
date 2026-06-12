@@ -238,7 +238,8 @@ function Ranking({ drivers }) {
                 i === 0 && React.createElement("span", null, "\uD83C\uDFC6"),
                 React.createElement("span", { style: Object.assign({ color: d.color, fontWeight: 700, fontSize: 13 }, mono) },
                     d.label,
-                    d.isMe ? " ⭐" : "")),
+                    d.isMe ? " ⭐" : ""),
+                d.orgName && React.createElement(Chip, { color: d.orgColor || C.sub, sm: true }, d.orgName)),
             React.createElement("div", { style: { display: "flex", gap: 10, alignItems: "baseline" } },
                 React.createElement("span", { style: Object.assign({ color: C.text, fontSize: 20, fontWeight: 800 }, mono) },
                     d.b.count,
@@ -268,7 +269,8 @@ function BestLapRanking({ drivers }) {
                     React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 7 } },
                         React.createElement("span", { style: Object.assign(Object.assign({ color: C.muted, fontSize: 11 }, mono), { minWidth: 20, fontWeight: 700 }) }, i + 1, "."),
                         i === 0 && React.createElement("span", null, "🏆"),
-                        React.createElement("span", { style: Object.assign({ color: d.color, fontWeight: 700, fontSize: 13 }, mono) }, d.label, d.isMe ? " ★" : "")),
+                        React.createElement("span", { style: Object.assign({ color: d.color, fontWeight: 700, fontSize: 13 }, mono) }, d.label, d.isMe ? " ★" : ""),
+                        d.orgName && React.createElement(Chip, { color: d.orgColor || C.sub, sm: true }, d.orgName)),
                     React.createElement("div", { style: { display: "flex", gap: 10, alignItems: "baseline" } },
                         React.createElement("span", { style: Object.assign({ color: C.text, fontSize: 18, fontWeight: 800 }, mono) }, fmtLap(d.best)),
                         gap > 0 && React.createElement("span", { style: Object.assign({ color: C.muted, fontSize: 11 }, mono) }, "+", fmtLap(gap)),
@@ -403,6 +405,11 @@ function App() {
     const [newCourseName, setNewCourseName] = useState("");
     const [editRivalCode, setEditRivalCode] = useState("");
     const [editRivalName, setEditRivalName] = useState("");
+    const [organizations, setOrgsRaw] = useState(() => loadLS('lm_orgs', []));
+    const setOrganizations = v => { const nv = typeof v === 'function' ? v(organizations) : v; setOrgsRaw(nv); saveLS('lm_orgs', nv); };
+    const [newOrgName, setNewOrgName] = useState("");
+    const [newOrgColor, setNewOrgColor] = useState("#e040fb");
+    const [orgChipInputs, setOrgChipInputs] = useState({});
 
     async function fetchActivities() {
         var _a;
@@ -489,6 +496,7 @@ function App() {
                     const myChipInfo = myChips.find(c => c.code === act.chipCode);
                     const chipName = rivalNames[act.chipCode];
                     const dLabel = isMe ? (myChipInfo?.name || act.chipLabel || act.chipCode) : (chipName || act.chipLabel || act.chipCode || String(act.id));
+                    const org = organizations.find(o => o.chips && o.chips.includes(act.chipCode));
                     return {
                         id: `${act.id}_${h}_${si}`, actId: act.id,
                         label: dLabel, chipCode: act.chipCode, laps, rawLaps: filteredRaw,
@@ -496,13 +504,14 @@ function App() {
                         bestLap: Math.min(...laps), isMe,
                         color: isMe ? C.accent : PAL[idx % PAL.length],
                         show: showOverride[act.id] ?? true,
+                        orgName: org ? org.name : null, orgColor: org ? org.color : null,
                     };
                 }).filter(Boolean);
                 if (sessionDrivers.length > 0) groups.push({ h, si, slotLabel: `枠${si + 1}`, label, drivers: sessionDrivers });
             }
         }
         return groups;
-    }, [activities, lapMap, filterDate, mpHourFrom, mpHourTo, mpSlots, minRunMin, myChips, rivalNames, showOverride]);
+    }, [activities, lapMap, filterDate, mpHourFrom, mpHourTo, mpSlots, minRunMin, myChips, rivalNames, showOverride, organizations]);
 
     const lapFetched = Object.keys(lapMap).length;
     const needFetch = activities.filter(a => { var _a; return ((_a = a.startTime) === null || _a === void 0 ? void 0 : _a.startsWith(filterDate)) && !lapMap[a.id]; }).length;
@@ -521,7 +530,7 @@ function App() {
                     React.createElement("span", { style: { color: C.sub, fontSize: 14 } }, settingsOpen ? "▲" : "▼")),
                 settingsOpen && React.createElement("div", null,
                     React.createElement("div", { style: { display: "flex", gap: 4, marginBottom: 12 } },
-                        [["courses", "コース"], ["mychips", "自分"], ["rivals", "ライバル"], ["proxy", "接続"]].map(([k, lbl]) =>
+                        [["courses", "コース"], ["mychips", "自分"], ["rivals", "ライバル"], ["orgs", "組織"], ["proxy", "接続"]].map(([k, lbl]) =>
                             React.createElement("button", { key: k, onClick: () => setSettingsTab(k), style: Object.assign({ padding: "5px 12px", borderRadius: 5, fontSize: 11, fontWeight: 700, cursor: "pointer", background: settingsTab === k ? C.cyan + "33" : C.bg, color: settingsTab === k ? C.cyan : C.sub, border: `1px solid ${settingsTab === k ? C.cyan + "66" : C.border}` }, mono) }, lbl))),
                     settingsTab === "courses" && React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 8 } },
                         React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
@@ -553,6 +562,33 @@ function App() {
                             React.createElement("input", { value: editRivalCode, onChange: e => setEditRivalCode(e.target.value), placeholder: "ポンダーコード", style: Object.assign({ flex: 1, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 5, color: C.text, padding: "5px 8px", fontSize: 11, outline: "none" }, mono) }),
                             React.createElement("input", { value: editRivalName, onChange: e => setEditRivalName(e.target.value), placeholder: "名前", style: Object.assign({ flex: 2, background: C.bg, border: `1px solid ${C.border}`, borderRadius: 5, color: C.text, padding: "5px 8px", fontSize: 11, outline: "none" }, mono) }),
                             React.createElement(Btn, { sm: true, onClick: () => { if (editRivalCode && editRivalName) { setRivalNames(r => Object.assign({}, r, { [editRivalCode.trim()]: editRivalName.trim() })); setEditRivalCode(""); setEditRivalName(""); } } }, "登録"))),
+                    settingsTab === "orgs" && React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } },
+                        React.createElement("div", { style: { color: C.sub, fontSize: 11, marginBottom: 2 } }, "会社・チームを登録し、ポンダーコードを紐付けます。"),
+                        organizations.map((org, oi) => React.createElement("div", { key: org.id, style: { background: C.bg, border: `1px solid ${org.color}55`, borderRadius: 8, padding: "10px 12px", display: "flex", flexDirection: "column", gap: 8 } },
+                            React.createElement("div", { style: { display: "flex", alignItems: "center", gap: 8 } },
+                                React.createElement("div", { style: { width: 14, height: 14, borderRadius: 3, background: org.color, flexShrink: 0 } }),
+                                React.createElement("span", { style: Object.assign({ color: org.color, fontWeight: 700, fontSize: 13, flex: 1 }, mono) }, org.name),
+                                React.createElement("button", { onClick: () => setOrganizations(os => os.filter((_, i) => i !== oi)), style: { background: "transparent", border: "none", color: C.red, cursor: "pointer", fontSize: 14, padding: "0 4px" } }, "×")),
+                            (org.chips && org.chips.length > 0) && React.createElement("div", { style: { display: "flex", flexWrap: "wrap", gap: 4 } },
+                                org.chips.map(chip => React.createElement("div", { key: chip, style: { display: "flex", alignItems: "center", gap: 3, background: org.color + "22", border: `1px solid ${org.color}55`, borderRadius: 4, padding: "2px 6px" } },
+                                    React.createElement("span", { style: Object.assign({ color: org.color, fontSize: 10 }, mono) }, chip),
+                                    React.createElement("button", { onClick: () => setOrganizations(os => os.map((o, i) => i === oi ? Object.assign({}, o, { chips: o.chips.filter(c => c !== chip) }) : o)), style: { background: "transparent", border: "none", color: C.red, cursor: "pointer", fontSize: 11, padding: "0 2px", lineHeight: 1 } }, "×")))),
+                            React.createElement("div", { style: { display: "flex", gap: 6 } },
+                                React.createElement("input", { value: orgChipInputs[org.id] || "", onChange: e => setOrgChipInputs(s => Object.assign({}, s, { [org.id]: e.target.value })), placeholder: "ポンダーコード", style: Object.assign({ flex: 1, background: C.surf, border: `1px solid ${C.border}`, borderRadius: 5, color: C.text, padding: "4px 8px", fontSize: 11, outline: "none" }, mono) }),
+                                React.createElement(Btn, { sm: true, v: "secondary", onClick: () => {
+                                    const chip = (orgChipInputs[org.id] || "").trim();
+                                    if (!chip) return;
+                                    setOrganizations(os => os.map((o, i) => i === oi ? Object.assign({}, o, { chips: [...(o.chips || []), chip].filter((c, idx, arr) => arr.indexOf(c) === idx) }) : o));
+                                    setOrgChipInputs(s => Object.assign({}, s, { [org.id]: "" }));
+                                } }, "追加")))),
+                        React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center", background: C.bg, border: `1px solid ${C.border}`, borderRadius: 7, padding: "8px 10px" } },
+                            React.createElement("input", { type: "color", value: newOrgColor, onChange: e => setNewOrgColor(e.target.value), style: { width: 32, height: 28, border: "none", borderRadius: 4, cursor: "pointer", background: "transparent", padding: 0 } }),
+                            React.createElement("input", { value: newOrgName, onChange: e => setNewOrgName(e.target.value), placeholder: "会社・チーム名", style: Object.assign({ flex: 1, background: C.surf, border: `1px solid ${C.border}`, borderRadius: 5, color: C.text, padding: "5px 8px", fontSize: 12, outline: "none" }, mono) }),
+                            React.createElement(Btn, { sm: true, onClick: () => {
+                                if (!newOrgName.trim()) return;
+                                setOrganizations(os => [...os, { id: Date.now().toString(), name: newOrgName.trim(), color: newOrgColor, chips: [] }]);
+                                setNewOrgName("");
+                            } }, "+ 追加"))),
                     settingsTab === "proxy" && React.createElement("div", { style: { display: "flex", flexDirection: "column", gap: 10 } },
                         React.createElement("div", { style: { color: C.sub, fontSize: 11, lineHeight: 1.6 } }, "SpeedHive APIへ接続するためのプロキシURL（Cloudflare Workerなど）を入力してください。"),
                         React.createElement("div", { style: { display: "flex", gap: 6, alignItems: "center" } },
