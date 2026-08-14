@@ -174,7 +174,8 @@
     confirmDeleteId: null,
     setupMode: false,
     setupStep: 'choose', // 'choose' | 'created'
-    setupError: ''
+    setupError: '',
+    showManual: false
   };
 
   var app = document.getElementById('app');
@@ -182,17 +183,35 @@
   // ---------- remote storage (jsonblob.com, no auth) ----------
   function blobUrl(id) { return JSONBLOB_BASE + '/' + id; }
 
+  function extractId(res) {
+    // The blob ID can arrive in a few different ways depending on what the
+    // browser lets us read back through CORS. Try each in turn.
+    var loc = res.headers.get('Location');
+    if (loc) {
+      var fromLoc = loc.split('/').pop();
+      if (fromLoc) return fromLoc;
+    }
+    var xjb = res.headers.get('X-jsonblob');
+    if (xjb) return xjb;
+    if (res.url && res.url.indexOf('/api/') !== -1) {
+      var fromUrl = res.url.split('/').pop();
+      if (fromUrl && fromUrl !== 'jsonBlob') return fromUrl;
+    }
+    return null;
+  }
+
   function createBlob(initialData) {
     return fetch(JSONBLOB_BASE, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
       body: JSON.stringify(initialData)
     }).then(function (res) {
-      if (!res.ok) throw new Error('create failed');
-      var loc = res.headers.get('Location') || '';
-      var id = loc.split('/').pop();
-      if (!id) throw new Error('no id returned');
+      if (!res.ok) throw new Error('サーバーが ' + res.status + ' を返しました');
+      var id = extractId(res);
+      if (!id) throw new Error('IDを読み取れませんでした（ブラウザのCORS制限の可能性）');
       return id;
+    }).catch(function (err) {
+      throw new Error(err && err.message ? err.message : '通信に失敗しました');
     });
   }
 
@@ -315,8 +334,9 @@
       localStorage.setItem(LS_CACHE, JSON.stringify(initial));
       state.setupStep = 'created';
       render();
-    }).catch(function () {
-      state.setupError = '作成に失敗しました。通信環境を確認してもう一度お試しください。';
+    }).catch(function (err) {
+      state.setupError = '自動作成に失敗しました（' + (err && err.message ? err.message : '原因不明') + '）。下の「手動で作る方法」をお試しください。';
+      state.showManual = true;
       render();
     });
   }
@@ -330,7 +350,15 @@
       state.blobId = id;
       localStorage.setItem(LS_BLOB_ID, id);
       state.balances = data.balances || { her: 4678, me: 3920 };
-      state.history = data.history || [];
+      // An empty blob (manually created as {}) needs seeding with the opening balances.
+      if (data.history && data.history.length) {
+        state.history = data.history;
+      } else {
+        state.history = [
+          { id: uid(), date: todayISO(), person: 'her', type: 'initial', label: '初期残高', amount: 4678 },
+          { id: uid(), date: todayISO(), person: 'me', type: 'initial', label: '初期残高', amount: 3920 }
+        ];
+      }
       state.lastCreditedMonday = data.lastCreditedMonday || mostRecentMonday(todayISO());
       localStorage.setItem(LS_CACHE, JSON.stringify(snapshot()));
       state.setupMode = false;
@@ -400,6 +428,16 @@
       html += '<div class="field-row"><input type="text" id="connect-input" class="input-wide" placeholder="共有ID（もらったものを貼り付け）" /></div>';
       html += '<button class="setup-btn-primary" data-action="connect" style="background:' + PEOPLE.me.accent + '">この共有IDで接続する</button>';
       if (state.setupError) html += '<div class="warn-text">' + escapeHtml(state.setupError) + '</div>';
+      html += '<button type="button" class="share-link" data-action="toggle-manual" style="margin-top:0">手動で作る方法</button>';
+      if (state.showManual) {
+        html += '<div class="setup-id-box" style="text-align:left">';
+        html += '<p class="setup-text" style="margin:0">1. 別タブで <b>jsonblob.com</b> を開く<br>';
+        html += '2. エディタの中身をすべて消して <code>{}</code> だけ入力<br>';
+        html += '3. 「Save」を押す<br>';
+        html += '4. アドレスバーのURL末尾の長い英数字（例: 12345…abcde）をコピー<br>';
+        html += '5. それを上の入力欄に貼り付けて「接続する」</p>';
+        html += '</div>';
+      }
     } else if (state.setupStep === 'created') {
       html += '<div class="setup-title">作成しました</div>';
       html += '<p class="setup-text">下の共有IDをLINEなどでもう一人に送ってください。相手は「共有IDで接続」からこのIDを入力すれば、同じ残高・履歴を見られるようになります。</p>';
@@ -418,6 +456,11 @@
     if (connectBtn) connectBtn.addEventListener('click', function () {
       var input = app.querySelector('#connect-input');
       doConnect(input ? input.value : '');
+    });
+    var manualBtn = app.querySelector('[data-action="toggle-manual"]');
+    if (manualBtn) manualBtn.addEventListener('click', function () {
+      state.showManual = !state.showManual;
+      render();
     });
     var finishBtn = app.querySelector('[data-action="finish-setup"]');
     if (finishBtn) finishBtn.addEventListener('click', finishSetup);
