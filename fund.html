@@ -117,8 +117,9 @@
   'use strict';
 
   // ---------- config ----------
-  var JSONBLOB_BASE = 'https://jsonblob.com/api/jsonBlob';
-  var LS_BLOB_ID = 'mini4wd_blob_id';
+  var KVDB_BASE = 'https://kvdb.io';
+  var DATA_KEY = 'fund';
+  var LS_BLOB_ID = 'mini4wd_bucket_id';
   var LS_CACHE = 'mini4wd_cache';
 
   var PEOPLE = {
@@ -175,60 +176,52 @@
     setupMode: false,
     setupStep: 'choose', // 'choose' | 'created'
     setupError: '',
+    setupEmail: '',
     showManual: false
   };
 
   var app = document.getElementById('app');
 
-  // ---------- remote storage (jsonblob.com, no auth) ----------
-  function blobUrl(id) { return JSONBLOB_BASE + '/' + id; }
+  // ---------- remote storage (kvdb.io, no login) ----------
+  function dataUrl(id) { return KVDB_BASE + '/' + id + '/' + DATA_KEY; }
 
-  function extractId(res) {
-    // The blob ID can arrive in a few different ways depending on what the
-    // browser lets us read back through CORS. Try each in turn.
-    var loc = res.headers.get('Location');
-    if (loc) {
-      var fromLoc = loc.split('/').pop();
-      if (fromLoc) return fromLoc;
-    }
-    var xjb = res.headers.get('X-jsonblob');
-    if (xjb) return xjb;
-    if (res.url && res.url.indexOf('/api/') !== -1) {
-      var fromUrl = res.url.split('/').pop();
-      if (fromUrl && fromUrl !== 'jsonBlob') return fromUrl;
-    }
-    return null;
-  }
-
+  // Bucket creation returns the bucket ID in the response BODY (not a header),
+  // so there is no CORS header-exposure problem here.
   function createBlob(initialData) {
-    return fetch(JSONBLOB_BASE, {
+    return fetch(KVDB_BASE + '/', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'Accept': 'application/json' },
-      body: JSON.stringify(initialData)
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body: 'email=' + encodeURIComponent(state.setupEmail) + '&default_ttl=0'
     }).then(function (res) {
       if (!res.ok) throw new Error('サーバーが ' + res.status + ' を返しました');
-      var id = extractId(res);
-      if (!id) throw new Error('IDを読み取れませんでした（ブラウザのCORS制限の可能性）');
-      return id;
-    }).catch(function (err) {
-      throw new Error(err && err.message ? err.message : '通信に失敗しました');
+      return res.text();
+    }).then(function (id) {
+      id = (id || '').trim();
+      if (!id) throw new Error('IDが空でした');
+      // Seed the bucket with the opening data before handing the ID back.
+      return writeBlob(id, initialData).then(function () { return id; });
     });
   }
 
   function readBlob(id) {
-    return fetch(blobUrl(id)).then(function (res) {
-      if (!res.ok) throw new Error('not found');
-      return res.json();
+    return fetch(dataUrl(id)).then(function (res) {
+      if (res.status === 404) return {};
+      if (!res.ok) throw new Error('取得に失敗しました（' + res.status + '）');
+      return res.text().then(function (txt) {
+        if (!txt) return {};
+        try { return JSON.parse(txt); } catch (e) { return {}; }
+      });
     });
   }
 
+  // Content-Type text/plain keeps this a "simple" request, avoiding a CORS preflight.
   function writeBlob(id, data) {
-    return fetch(blobUrl(id), {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
+    return fetch(dataUrl(id), {
+      method: 'POST',
+      headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify(data)
     }).then(function (res) {
-      if (!res.ok) throw new Error('write failed');
+      if (!res.ok) throw new Error('保存に失敗しました（' + res.status + '）');
       return true;
     });
   }
@@ -335,8 +328,7 @@
       state.setupStep = 'created';
       render();
     }).catch(function (err) {
-      state.setupError = '自動作成に失敗しました（' + (err && err.message ? err.message : '原因不明') + '）。下の「手動で作る方法」をお試しください。';
-      state.showManual = true;
+      state.setupError = '作成に失敗しました（' + (err && err.message ? err.message : '原因不明') + '）。もう一度お試しください。';
       render();
     });
   }
@@ -423,21 +415,12 @@
     if (state.setupStep === 'choose') {
       html += '<div class="setup-title">はじめに</div>';
       html += '<p class="setup-text">ログイン不要で、二人の残高・購入履歴を共有できます。どちらか片方が最初に「新規作成」し、もう片方はもらった共有IDで「接続」してください。</p>';
+      html += '<div class="field-row"><input type="email" id="email-input" class="input-wide" placeholder="メールアドレス（作成時のみ使用）" value="' + escapeHtml(state.setupEmail) + '" /></div>';
       html += '<button class="setup-btn-primary" data-action="create-new">新しく共有データを作る</button>';
       html += '<div class="setup-divider">— または —</div>';
       html += '<div class="field-row"><input type="text" id="connect-input" class="input-wide" placeholder="共有ID（もらったものを貼り付け）" /></div>';
       html += '<button class="setup-btn-primary" data-action="connect" style="background:' + PEOPLE.me.accent + '">この共有IDで接続する</button>';
       if (state.setupError) html += '<div class="warn-text">' + escapeHtml(state.setupError) + '</div>';
-      html += '<button type="button" class="share-link" data-action="toggle-manual" style="margin-top:0">手動で作る方法</button>';
-      if (state.showManual) {
-        html += '<div class="setup-id-box" style="text-align:left">';
-        html += '<p class="setup-text" style="margin:0">1. 別タブで <b>jsonblob.com</b> を開く<br>';
-        html += '2. エディタの中身をすべて消して <code>{}</code> だけ入力<br>';
-        html += '3. 「Save」を押す<br>';
-        html += '4. アドレスバーのURL末尾の長い英数字（例: 12345…abcde）をコピー<br>';
-        html += '5. それを上の入力欄に貼り付けて「接続する」</p>';
-        html += '</div>';
-      }
     } else if (state.setupStep === 'created') {
       html += '<div class="setup-title">作成しました</div>';
       html += '<p class="setup-text">下の共有IDをLINEなどでもう一人に送ってください。相手は「共有IDで接続」からこのIDを入力すれば、同じ残高・履歴を見られるようになります。</p>';
@@ -450,17 +433,23 @@
     html += '</div>';
     app.innerHTML = html;
 
+    var emailInput = app.querySelector('#email-input');
+    if (emailInput) emailInput.addEventListener('input', function (e) { state.setupEmail = e.target.value; });
     var createBtn = app.querySelector('[data-action="create-new"]');
-    if (createBtn) createBtn.addEventListener('click', doCreateNew);
+    if (createBtn) createBtn.addEventListener('click', function () {
+      var ei = app.querySelector('#email-input');
+      state.setupEmail = ei ? ei.value.trim() : '';
+      if (!state.setupEmail) {
+        state.setupError = 'メールアドレスを入力してください（保存サービスの作成に必要です）。';
+        render();
+        return;
+      }
+      doCreateNew();
+    });
     var connectBtn = app.querySelector('[data-action="connect"]');
     if (connectBtn) connectBtn.addEventListener('click', function () {
       var input = app.querySelector('#connect-input');
       doConnect(input ? input.value : '');
-    });
-    var manualBtn = app.querySelector('[data-action="toggle-manual"]');
-    if (manualBtn) manualBtn.addEventListener('click', function () {
-      state.showManual = !state.showManual;
-      render();
     });
     var finishBtn = app.querySelector('[data-action="finish-setup"]');
     if (finishBtn) finishBtn.addEventListener('click', finishSetup);
