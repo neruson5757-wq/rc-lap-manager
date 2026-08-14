@@ -225,8 +225,10 @@
       headers: { 'Content-Type': 'text/plain' },
       body: JSON.stringify(data)
     }).then(function (res) {
-      if (!res.ok) throw new Error('保存に失敗しました（' + res.status + '）');
-      return true;
+      if (res.ok) return true;
+      return res.text().then(function (txt) {
+        throw new Error('保存に失敗しました（' + res.status + ': ' + (txt || '応答なし').slice(0, 80) + '） bucket=' + id);
+      });
     });
   }
 
