@@ -1,0 +1,594 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0" />
+<title>由貴＆幸太 ミニ四駆パーツ資金</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Zen+Kaku+Gothic+New:wght@400;500;700;900&family=JetBrains+Mono:wght@500;700&display=swap" rel="stylesheet">
+<style>
+  :root {
+    --bg: #EDEFF0;
+    --ink: #1C1F26;
+    --ink-soft: #5B6472;
+    --muted: #8A93A3;
+    --line: #D7D9DD;
+    --line-soft: #E4E6E9;
+    --her: #E6417F;
+    --her-soft: #FDE7EF;
+    --me: #2B6CE6;
+    --me-soft: #E7EEFC;
+    --pos: #2E9E5B;
+    --neg: #D93B3B;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; padding: 0; }
+  body {
+    background: var(--bg);
+    font-family: 'Zen Kaku Gothic New', 'Hiragino Sans', sans-serif;
+    color: var(--ink);
+    padding: 20px 14px 48px;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .container { max-width: 460px; margin: 0 auto; }
+  .mono { font-family: 'JetBrains Mono', monospace; }
+
+  .header { text-align: center; margin-bottom: 10px; }
+  .eyebrow { font-family: 'JetBrains Mono', monospace; font-size: 10px; letter-spacing: 0.14em; color: var(--muted); font-weight: 700; }
+  .title { font-size: 22px; font-weight: 900; margin: 4px 0 2px; letter-spacing: 0.01em; }
+  .subtitle { font-size: 12.5px; color: var(--ink-soft); margin: 0; }
+  .checkered {
+    height: 8px; margin: 14px 0 18px; border-radius: 2px;
+    background-image: repeating-conic-gradient(var(--ink) 0% 25%, transparent 0% 50%);
+    background-size: 8px 8px; opacity: 0.85;
+  }
+
+  .balance-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; margin-bottom: 8px; }
+  .card { background: var(--ink); border-radius: 14px; border: 2px solid; overflow: hidden; display: flex; flex-direction: column; }
+  .card-tab { font-size: 12px; font-weight: 700; color: #fff; padding: 6px 10px; letter-spacing: 0.02em; }
+  .plate { padding: 10px 10px 4px; }
+  .digits { font-family: 'JetBrains Mono', monospace; font-weight: 700; font-size: 22px; line-height: 1.15; font-variant-numeric: tabular-nums; word-break: break-all; }
+  .card-foot { font-size: 10.5px; color: var(--muted); padding: 0 10px 10px; font-family: 'JetBrains Mono', monospace; }
+  .next-credit { text-align: center; font-size: 11px; color: var(--muted); margin-bottom: 18px; }
+
+  .panel { background: #fff; border-radius: 14px; padding: 14px; margin-bottom: 16px; border: 1px solid var(--line); }
+  .section-label { font-size: 12px; font-weight: 700; color: var(--ink-soft); letter-spacing: 0.04em; margin-bottom: 10px; display: flex; align-items: center; justify-content: space-between; }
+  .saving-tag { font-size: 10.5px; color: var(--muted); font-weight: 500; }
+
+  .segmented { display: flex; gap: 6px; background: #F0EFEA; padding: 4px; border-radius: 10px; margin-bottom: 10px; }
+  .seg-btn { flex: 1; border: none; border-radius: 7px; padding: 8px 0; font-size: 13px; font-weight: 700; cursor: pointer; background: transparent; font-family: inherit; }
+  .seg-btn.active-her { background: var(--her); color: #fff; }
+  .seg-btn.active-me { background: var(--me); color: #fff; }
+  .seg-btn.inactive-her { color: var(--her); }
+  .seg-btn.inactive-me { color: var(--me); }
+
+  .field-row { display: flex; gap: 8px; margin-bottom: 8px; }
+  .input-wide { flex: 1; padding: 10px 12px; border-radius: 9px; border: 1.5px solid var(--line); font-size: 14px; font-family: inherit; color: var(--ink); min-width: 0; }
+  .yen-field { display: flex; align-items: center; flex: 1; border: 1.5px solid var(--line); border-radius: 9px; padding: 0 12px; }
+  .yen-prefix { font-family: 'JetBrains Mono', monospace; font-size: 14px; color: var(--muted); margin-right: 3px; }
+  .input-yen { flex: 1; border: none; padding: 10px 0; font-size: 14px; font-family: 'JetBrains Mono', monospace; color: var(--ink); min-width: 0; }
+  .input-date { width: 132px; padding: 10px 8px; border-radius: 9px; border: 1.5px solid var(--line); font-size: 13px; color: var(--ink); font-family: inherit; }
+  .warn-text { font-size: 11.5px; color: var(--neg); margin-bottom: 8px; font-weight: 500; }
+  .submit-btn { width: 100%; padding: 11px 0; border-radius: 9px; border: none; background: var(--ink); color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 2px; font-family: inherit; }
+  .submit-btn:disabled { opacity: 0.4; }
+
+  .error-banner { background: #FDE7E7; color: var(--neg); font-size: 12px; padding: 8px 10px; border-radius: 8px; margin-bottom: 8px; }
+  .empty-state { text-align: center; color: var(--muted); font-size: 13px; padding: 24px 0; }
+  .history-list { display: flex; flex-direction: column; gap: 6px; }
+  .history-row { background: #fff; border: 1px solid var(--line-soft); border-radius: 10px; padding: 9px 11px; display: flex; align-items: center; justify-content: space-between; }
+  .row-left { display: flex; align-items: center; gap: 9px; }
+  .dot { width: 8px; height: 8px; border-radius: 50%; flex-shrink: 0; }
+  .row-label { font-size: 13.5px; font-weight: 700; }
+  .row-meta { font-size: 11px; color: var(--muted); margin-top: 1px; }
+  .row-right { display: flex; align-items: center; gap: 8px; }
+  .row-amount { font-family: 'JetBrains Mono', monospace; font-size: 13px; font-weight: 700; }
+  .icon-btn { border: none; background: transparent; cursor: pointer; padding: 4px; display: flex; font-family: inherit; }
+  .trash-btn { color: #C3C8D0; }
+  .confirm-group { display: flex; gap: 6px; }
+  .confirm-yes { border: none; background: var(--neg); color: #fff; border-radius: 7px; padding: 5px 7px; cursor: pointer; display: flex; }
+  .confirm-no { border: none; background: var(--line-soft); color: var(--ink-soft); border-radius: 7px; padding: 5px 7px; cursor: pointer; display: flex; }
+
+  .footer-note { text-align: center; font-size: 11px; color: var(--muted); margin-top: 16px; }
+  .share-link { text-align: center; font-size: 11.5px; color: var(--me); margin-top: 6px; cursor: pointer; text-decoration: underline; background: none; border: none; font-family: inherit; }
+
+  .loading-screen { min-height: 80vh; display: flex; align-items: center; justify-content: center; color: var(--ink-soft); font-size: 14px; }
+
+  /* Setup screen */
+  .setup-card { background: #fff; border-radius: 16px; padding: 22px 18px; border: 1px solid var(--line); }
+  .setup-title { font-size: 17px; font-weight: 900; margin: 0 0 8px; }
+  .setup-text { font-size: 13px; color: var(--ink-soft); line-height: 1.7; margin: 0 0 16px; }
+  .setup-btn-primary { width: 100%; padding: 13px 0; border-radius: 10px; border: none; background: var(--ink); color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; margin-bottom: 14px; font-family: inherit; }
+  .setup-divider { text-align: center; font-size: 11px; color: var(--muted); margin: 4px 0 12px; }
+  .setup-id-box { background: #F0EFEA; border-radius: 10px; padding: 12px; margin-top: 14px; text-align: center; }
+  .setup-id { font-family: 'JetBrains Mono', monospace; font-size: 14px; font-weight: 700; word-break: break-all; }
+  .setup-id-label { font-size: 11px; color: var(--muted); margin-bottom: 6px; }
+  .setup-continue { width: 100%; padding: 11px 0; border-radius: 9px; border: none; background: var(--pos); color: #fff; font-size: 14px; font-weight: 700; cursor: pointer; margin-top: 12px; font-family: inherit; }
+
+  input:focus, button:focus { outline: 2px solid var(--me); outline-offset: 1px; }
+  @media (prefers-reduced-motion: reduce) { * { transition: none !important; } }
+</style>
+</head>
+<body>
+  <div id="app"></div>
+
+<script>
+(function () {
+  'use strict';
+
+  // ---------- config ----------
+  var JSONBLOB_BASE = 'https://jsonblob.com/api/jsonBlob';
+  var LS_BLOB_ID = 'mini4wd_blob_id';
+  var LS_CACHE = 'mini4wd_cache';
+
+  var PEOPLE = {
+    her: { label: '由貴', accent: '#E6417F', soft: '#FDE7EF' },
+    me: { label: '幸太', accent: '#2B6CE6', soft: '#E7EEFC' }
+  };
+
+  // ---------- date helpers ----------
+  function todayISO() { return new Date().toISOString().slice(0, 10); }
+  function addDaysISO(iso, days) {
+    var d = new Date(iso + 'T00:00:00');
+    d.setDate(d.getDate() + days);
+    return d.toISOString().slice(0, 10);
+  }
+  function mostRecentMonday(iso) {
+    var d = new Date(iso + 'T00:00:00');
+    var daysSinceMonday = (d.getDay() + 6) % 7;
+    d.setDate(d.getDate() - daysSinceMonday);
+    return d.toISOString().slice(0, 10);
+  }
+  function formatYen(n) {
+    var sign = n < 0 ? '-' : '';
+    return sign + '¥' + Math.abs(n).toLocaleString('ja-JP');
+  }
+  function formatDateJP(iso) {
+    var d = new Date(iso + 'T00:00:00');
+    var w = ['日', '月', '火', '水', '木', '金', '土'][d.getDay()];
+    return (d.getMonth() + 1) + '/' + d.getDate() + '(' + w + ')';
+  }
+  function uid() {
+    if (window.crypto && window.crypto.randomUUID) return window.crypto.randomUUID();
+    return 'id-' + Date.now() + '-' + Math.random().toString(16).slice(2);
+  }
+  function escapeHtml(s) {
+    return String(s).replace(/[&<>"']/g, function (c) {
+      return { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c];
+    });
+  }
+
+  // ---------- app state ----------
+  var state = {
+    blobId: localStorage.getItem(LS_BLOB_ID) || null,
+    balances: { her: 4678, me: 3920 },
+    history: [],
+    lastCreditedMonday: mostRecentMonday(todayISO()),
+    loading: true,
+    saving: false,
+    errorMsg: '',
+    formPerson: 'me',
+    itemName: '',
+    price: '',
+    date: todayISO(),
+    confirmDeleteId: null,
+    setupMode: false,
+    setupStep: 'choose', // 'choose' | 'created'
+    setupError: ''
+  };
+
+  var app = document.getElementById('app');
+
+  // ---------- remote storage (jsonblob.com, no auth) ----------
+  function blobUrl(id) { return JSONBLOB_BASE + '/' + id; }
+
+  function createBlob(initialData) {
+    return fetch(JSONBLOB_BASE, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(initialData)
+    }).then(function (res) {
+      if (!res.ok) throw new Error('create failed');
+      var loc = res.headers.get('Location') || '';
+      var id = loc.split('/').pop();
+      if (!id) throw new Error('no id returned');
+      return id;
+    });
+  }
+
+  function readBlob(id) {
+    return fetch(blobUrl(id)).then(function (res) {
+      if (!res.ok) throw new Error('not found');
+      return res.json();
+    });
+  }
+
+  function writeBlob(id, data) {
+    return fetch(blobUrl(id), {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(data)
+    }).then(function (res) {
+      if (!res.ok) throw new Error('write failed');
+      return true;
+    });
+  }
+
+  function snapshot() {
+    return { balances: state.balances, history: state.history, lastCreditedMonday: state.lastCreditedMonday };
+  }
+
+  function persist() {
+    state.saving = true;
+    render();
+    var data = snapshot();
+    localStorage.setItem(LS_CACHE, JSON.stringify(data));
+    return writeBlob(state.blobId, data).then(function () {
+      state.saving = false;
+      state.errorMsg = '';
+      render();
+    }).catch(function () {
+      state.saving = false;
+      state.errorMsg = '保存に失敗しました。通信環境を確認してもう一度お試しください。';
+      render();
+    });
+  }
+
+  // ---------- auto weekly credit (every Monday) ----------
+  function applyAutoCredit() {
+    var today = todayISO();
+    var thisMonday = mostRecentMonday(today);
+    var candidate = addDaysISO(state.lastCreditedMonday, 7);
+    var newEntries = [];
+    while (candidate <= thisMonday) {
+      ['her', 'me'].forEach(function (key) {
+        state.balances[key] = state.balances[key] + 1000;
+        newEntries.push({
+          id: uid(), date: candidate, person: key, type: 'allowance',
+          label: '週次おこづかい（自動・月曜）', amount: 1000
+        });
+      });
+      state.lastCreditedMonday = candidate;
+      candidate = addDaysISO(candidate, 7);
+    }
+    if (newEntries.length) {
+      state.history = newEntries.reverse().concat(state.history);
+      return true;
+    }
+    return false;
+  }
+
+  // ---------- boot ----------
+  function boot() {
+    if (!state.blobId) {
+      state.loading = false;
+      state.setupMode = true;
+      render();
+      return;
+    }
+    // show cached data immediately if we have it, then reconcile with remote
+    try {
+      var cached = JSON.parse(localStorage.getItem(LS_CACHE) || 'null');
+      if (cached) {
+        state.balances = cached.balances || state.balances;
+        state.history = cached.history || state.history;
+        state.lastCreditedMonday = cached.lastCreditedMonday || state.lastCreditedMonday;
+      }
+    } catch (e) {}
+
+    readBlob(state.blobId).then(function (data) {
+      state.balances = data.balances || state.balances;
+      state.history = data.history || state.history;
+      state.lastCreditedMonday = data.lastCreditedMonday || state.lastCreditedMonday;
+      var changed = applyAutoCredit();
+      state.loading = false;
+      render();
+      if (changed) persist();
+      else localStorage.setItem(LS_CACHE, JSON.stringify(snapshot()));
+    }).catch(function () {
+      // remote unreachable — fall back to whatever was cached locally
+      applyAutoCredit();
+      state.loading = false;
+      state.errorMsg = '最新データの取得に失敗しました。表示は前回保存分です。';
+      render();
+    });
+  }
+
+  // ---------- setup actions ----------
+  function doCreateNew() {
+    state.setupError = '';
+    render();
+    var initial = {
+      balances: { her: 4678, me: 3920 },
+      history: [
+        { id: uid(), date: todayISO(), person: 'her', type: 'initial', label: '初期残高', amount: 4678 },
+        { id: uid(), date: todayISO(), person: 'me', type: 'initial', label: '初期残高', amount: 3920 }
+      ],
+      lastCreditedMonday: mostRecentMonday(todayISO())
+    };
+    createBlob(initial).then(function (id) {
+      state.blobId = id;
+      localStorage.setItem(LS_BLOB_ID, id);
+      state.balances = initial.balances;
+      state.history = initial.history;
+      state.lastCreditedMonday = initial.lastCreditedMonday;
+      localStorage.setItem(LS_CACHE, JSON.stringify(initial));
+      state.setupStep = 'created';
+      render();
+    }).catch(function () {
+      state.setupError = '作成に失敗しました。通信環境を確認してもう一度お試しください。';
+      render();
+    });
+  }
+
+  function doConnect(inputId) {
+    var id = (inputId || '').trim();
+    if (!id) return;
+    state.setupError = '';
+    render();
+    readBlob(id).then(function (data) {
+      state.blobId = id;
+      localStorage.setItem(LS_BLOB_ID, id);
+      state.balances = data.balances || { her: 4678, me: 3920 };
+      state.history = data.history || [];
+      state.lastCreditedMonday = data.lastCreditedMonday || mostRecentMonday(todayISO());
+      localStorage.setItem(LS_CACHE, JSON.stringify(snapshot()));
+      state.setupMode = false;
+      applyAutoCredit();
+      render();
+      persist();
+    }).catch(function () {
+      state.setupError = 'その共有IDは見つかりませんでした。IDを確認してもう一度お試しください。';
+      render();
+    });
+  }
+
+  function finishSetup() {
+    state.setupMode = false;
+    render();
+  }
+
+  // ---------- mutations ----------
+  function addPurchase() {
+    var p = parseInt(state.price, 10);
+    if (!state.itemName.trim() || !p || p <= 0) return;
+    var person = state.formPerson;
+    state.balances[person] = state.balances[person] - p;
+    var entry = {
+      id: uid(), date: state.date || todayISO(), person: person,
+      type: 'purchase', label: state.itemName.trim(), amount: -p
+    };
+    state.history = [entry].concat(state.history);
+    state.itemName = '';
+    state.price = '';
+    state.date = todayISO();
+    render();
+    persist();
+  }
+
+  function deleteEntry(id) {
+    var idx = -1;
+    for (var i = 0; i < state.history.length; i++) if (state.history[i].id === id) { idx = i; break; }
+    if (idx === -1) return;
+    var entry = state.history[idx];
+    state.balances[entry.person] = state.balances[entry.person] - entry.amount;
+    state.history = state.history.filter(function (h) { return h.id !== id; });
+    state.confirmDeleteId = null;
+    render();
+    persist();
+  }
+
+  // ---------- render ----------
+  function fontCss() { return ''; } // fonts loaded via <link> in <head>
+
+  function renderLoading() {
+    app.innerHTML = '<div class="container"><div class="loading-screen">読み込み中…</div></div>';
+  }
+
+  function renderSetup() {
+    var html = '<div class="container">';
+    html += '<div class="header"><div class="eyebrow">MINI 4WD PIT FUND</div>';
+    html += '<h1 class="title">由貴＆幸太 パーツ資金</h1></div>';
+    html += '<div class="checkered"></div>';
+    html += '<div class="setup-card">';
+
+    if (state.setupStep === 'choose') {
+      html += '<div class="setup-title">はじめに</div>';
+      html += '<p class="setup-text">ログイン不要で、二人の残高・購入履歴を共有できます。どちらか片方が最初に「新規作成」し、もう片方はもらった共有IDで「接続」してください。</p>';
+      html += '<button class="setup-btn-primary" data-action="create-new">新しく共有データを作る</button>';
+      html += '<div class="setup-divider">— または —</div>';
+      html += '<div class="field-row"><input type="text" id="connect-input" class="input-wide" placeholder="共有ID（もらったものを貼り付け）" /></div>';
+      html += '<button class="setup-btn-primary" data-action="connect" style="background:' + PEOPLE.me.accent + '">この共有IDで接続する</button>';
+      if (state.setupError) html += '<div class="warn-text">' + escapeHtml(state.setupError) + '</div>';
+    } else if (state.setupStep === 'created') {
+      html += '<div class="setup-title">作成しました</div>';
+      html += '<p class="setup-text">下の共有IDをLINEなどでもう一人に送ってください。相手は「共有IDで接続」からこのIDを入力すれば、同じ残高・履歴を見られるようになります。</p>';
+      html += '<div class="setup-id-box"><div class="setup-id-label">共有ID</div><div class="setup-id">' + escapeHtml(state.blobId) + '</div></div>';
+      html += '<button class="setup-continue" data-action="finish-setup">はじめる</button>';
+    }
+
+    html += '</div>';
+    html += '<div class="footer-note">この共有IDを知っている人は誰でも閲覧・編集できます。</div>';
+    html += '</div>';
+    app.innerHTML = html;
+
+    var createBtn = app.querySelector('[data-action="create-new"]');
+    if (createBtn) createBtn.addEventListener('click', doCreateNew);
+    var connectBtn = app.querySelector('[data-action="connect"]');
+    if (connectBtn) connectBtn.addEventListener('click', function () {
+      var input = app.querySelector('#connect-input');
+      doConnect(input ? input.value : '');
+    });
+    var finishBtn = app.querySelector('[data-action="finish-setup"]');
+    if (finishBtn) finishBtn.addEventListener('click', finishSetup);
+  }
+
+  function renderApp() {
+    var totals = { her: 0, me: 0 };
+    state.history.forEach(function (h) {
+      if (h.type === 'purchase') totals[h.person] += -h.amount;
+    });
+    var sorted = state.history.slice().sort(function (a, b) {
+      return a.date < b.date ? 1 : a.date > b.date ? -1 : 0;
+    });
+    var nextCreditDate = addDaysISO(state.lastCreditedMonday, 7);
+    var priceNum = parseInt(state.price, 10);
+    var overBudget = state.formPerson && priceNum > 0 && (state.balances[state.formPerson] - priceNum) < 0;
+
+    var html = '<div class="container">';
+    html += '<div class="header"><div class="eyebrow">MINI 4WD PIT FUND</div>';
+    html += '<h1 class="title">由貴＆幸太 パーツ資金</h1>';
+    html += '<p class="subtitle">毎週月曜日に¥1000が自動で加算。使わなければ、貯まる。</p></div>';
+    html += '<div class="checkered"></div>';
+
+    // balance cards
+    html += '<div class="balance-grid">';
+    ['her', 'me'].forEach(function (key) {
+      var p = PEOPLE[key];
+      var bal = state.balances[key];
+      var negative = bal < 0;
+      html += '<div class="card" style="border-color:' + p.accent + '">';
+      html += '<div class="card-tab" style="background:' + p.accent + '">' + p.label + '</div>';
+      html += '<div class="plate"><div class="digits" style="color:' + (negative ? '#FF6B6B' : p.accent) + '">' + formatYen(bal) + '</div></div>';
+      html += '<div class="card-foot">累計購入 ' + formatYen(totals[key]) + '</div>';
+      html += '</div>';
+    });
+    html += '</div>';
+    html += '<div class="next-credit">次の¥1000は自動で ' + formatDateJP(nextCreditDate) + ' に加算されます</div>';
+
+    // purchase form
+    html += '<div class="panel">';
+    html += '<div class="section-label">パーツを買ったら記録</div>';
+    html += '<div class="segmented">';
+    ['her', 'me'].forEach(function (key) {
+      var active = state.formPerson === key;
+      html += '<button type="button" class="seg-btn ' + (active ? 'active-' + key : 'inactive-' + key) + '" data-action="set-person" data-person="' + key + '">' + PEOPLE[key].label + '</button>';
+    });
+    html += '</div>';
+    html += '<div class="field-row"><input type="text" id="item-input" class="input-wide" placeholder="品名（例：フロントタイヤ）" maxlength="40" value="' + escapeHtml(state.itemName) + '" /></div>';
+    html += '<div class="field-row">';
+    html += '<div class="yen-field"><span class="yen-prefix">¥</span><input type="number" inputmode="numeric" id="price-input" class="input-yen" placeholder="金額" min="1" value="' + escapeHtml(state.price) + '" /></div>';
+    html += '<input type="date" id="date-input" class="input-date" value="' + state.date + '" />';
+    html += '</div>';
+    if (overBudget) {
+      html += '<div class="warn-text">' + PEOPLE[state.formPerson].label + 'の残高が ' + formatYen(state.balances[state.formPerson] - priceNum) + ' になります</div>';
+    }
+    html += '<button type="button" class="submit-btn" id="submit-purchase"' + ((!state.itemName.trim() || !state.price) ? ' disabled' : '') + '>記録する</button>';
+    html += '</div>';
+
+    // history
+    html += '<div class="panel">';
+    html += '<div class="section-label">レースログ' + (state.saving ? '<span class="saving-tag">保存中…</span>' : '') + '</div>';
+    if (state.errorMsg) html += '<div class="error-banner">' + escapeHtml(state.errorMsg) + '</div>';
+    if (sorted.length === 0) {
+      html += '<div class="empty-state">まだ記録がありません。買ったら記録しよう。</div>';
+    } else {
+      html += '<div class="history-list">';
+      sorted.forEach(function (h) {
+        var p = PEOPLE[h.person];
+        var positive = h.amount > 0;
+        var confirming = state.confirmDeleteId === h.id;
+        html += '<div class="history-row">';
+        html += '<div class="row-left"><span class="dot" style="background:' + p.accent + '"></span><div>';
+        html += '<div class="row-label">' + escapeHtml(h.label) + '</div>';
+        html += '<div class="row-meta">' + p.label + ' ・ ' + formatDateJP(h.date) + '</div>';
+        html += '</div></div>';
+        if (confirming) {
+          html += '<div class="confirm-group">';
+          html += '<button type="button" class="confirm-yes" data-action="delete-confirm" data-id="' + h.id + '">✓</button>';
+          html += '<button type="button" class="confirm-no" data-action="delete-cancel">✕</button>';
+          html += '</div>';
+        } else {
+          html += '<div class="row-right">';
+          html += '<span class="row-amount" style="color:' + (positive ? 'var(--pos)' : 'var(--ink)') + '">' + (h.amount > 0 ? '+' : '') + formatYen(h.amount) + '</span>';
+          html += '<button type="button" class="icon-btn trash-btn" data-action="delete-ask" data-id="' + h.id + '">🗑</button>';
+          html += '</div>';
+        }
+        html += '</div>';
+      });
+      html += '</div>';
+    }
+    html += '</div>';
+
+    html += '<div class="footer-note">行かなかった週の¥1000も、そのまま貯金されます。</div>';
+    html += '<div class="footer-note">この共有IDを知っている人は誰でも閲覧・編集できます。</div>';
+    html += '<button type="button" class="share-link" id="show-id">共有IDを表示</button>';
+    html += '</div>';
+
+    app.innerHTML = html;
+    wireAppEvents();
+  }
+
+  function wireAppEvents() {
+    app.querySelectorAll('[data-action="set-person"]').forEach(function (btn) {
+      btn.addEventListener('click', function () {
+        state.formPerson = btn.getAttribute('data-person');
+        render();
+      });
+    });
+    var itemInput = app.querySelector('#item-input');
+    if (itemInput) itemInput.addEventListener('input', function (e) { state.itemName = e.target.value; syncSubmitState(); });
+    var priceInput = app.querySelector('#price-input');
+    if (priceInput) priceInput.addEventListener('input', function (e) { state.price = e.target.value; updateFormFeedback(); });
+    var dateInput = app.querySelector('#date-input');
+    if (dateInput) dateInput.addEventListener('change', function (e) { state.date = e.target.value; });
+    var submitBtn = app.querySelector('#submit-purchase');
+    if (submitBtn) submitBtn.addEventListener('click', addPurchase);
+
+    app.querySelectorAll('[data-action="delete-ask"]').forEach(function (btn) {
+      btn.addEventListener('click', function () { state.confirmDeleteId = btn.getAttribute('data-id'); render(); });
+    });
+    app.querySelectorAll('[data-action="delete-cancel"]').forEach(function (btn) {
+      btn.addEventListener('click', function () { state.confirmDeleteId = null; render(); });
+    });
+    app.querySelectorAll('[data-action="delete-confirm"]').forEach(function (btn) {
+      btn.addEventListener('click', function () { deleteEntry(btn.getAttribute('data-id')); });
+    });
+    var showIdBtn = app.querySelector('#show-id');
+    if (showIdBtn) showIdBtn.addEventListener('click', function () {
+      alert('共有ID:\n' + state.blobId);
+    });
+  }
+
+  // avoid full re-render (and losing focus) while typing the item name
+  function syncSubmitState() {
+    var submitBtn = app.querySelector('#submit-purchase');
+    if (submitBtn) submitBtn.disabled = !(state.itemName.trim() && state.price);
+  }
+
+  // avoid full re-render (and losing focus) while typing the price
+  function updateFormFeedback() {
+    syncSubmitState();
+    var panel = app.querySelector('.panel');
+    if (!panel) return;
+    var priceNum = parseInt(state.price, 10);
+    var overBudget = state.formPerson && priceNum > 0 && (state.balances[state.formPerson] - priceNum) < 0;
+    var existingWarn = panel.querySelector('.warn-text');
+    if (overBudget) {
+      var text = PEOPLE[state.formPerson].label + 'の残高が ' + formatYen(state.balances[state.formPerson] - priceNum) + ' になります';
+      if (existingWarn) {
+        existingWarn.textContent = text;
+      } else {
+        var div = document.createElement('div');
+        div.className = 'warn-text';
+        div.textContent = text;
+        var submitBtn = panel.querySelector('#submit-purchase');
+        panel.insertBefore(div, submitBtn);
+      }
+    } else if (existingWarn) {
+      existingWarn.remove();
+    }
+  }
+
+  function render() {
+    if (state.loading) { renderLoading(); return; }
+    if (state.setupMode) { renderSetup(); return; }
+    renderApp();
+  }
+
+  render();
+  boot();
+})();
+</script>
+</body>
+</html>
